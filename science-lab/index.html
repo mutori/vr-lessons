@@ -18,6 +18,7 @@
   #help button { margin-top: 6px; background: #34506b; color: #fff; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
   #help.min p, #help.min ul { display: none; }
   #help ul { margin: 4px 0; padding-left: 18px; }
+  #results { position: absolute; right: 12px; top: 12px; max-width: 320px; background: rgba(255,255,255,0.92); color: #13293d; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
   #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #234; font-size: 18px; }
 </style>
 </head>
@@ -25,15 +26,20 @@
 <div id="loading">Loading the lab…</div>
 <div id="help">
   <h1>O-Level Science Lab VR</h1>
-  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page.</p>
+  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
   <ul>
-    <li>Point the laser and pull the <b>trigger</b> (or pinch with hand tracking) to use things.</li>
-    <li>Point at a <b>green floor pad</b> and pull the trigger to move to that bench.</li>
-    <li>Right thumbstick: turn. Left thumbstick: walk.</li>
+    <li><b>Touch</b> buttons with your fingertip (or the controller tip).</li>
+    <li><b>Pinch</b> a tool to pick it up. It stays in your hand. Bring it to its target and pinch again to use it. Pinch in empty air to put it back.</li>
+    <li>For things out of reach, <b>point</b> and pinch (or pull the trigger).</li>
+    <li>Move between benches with the <b>Prev / Start / Next</b> buttons on each bench, or a green floor pad. Thumbstick walking is off unless you switch it on at the start table.</li>
   </ul>
   <p>On a computer: <b>click</b> to use, <b>drag</b> to look, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to walk, <kbd>1</kbd>–<kbd>5</kbd> jump to a bench, <kbd>H</kbd> back to the start.</p>
   <button id="helpToggle">Hide help</button>
 </div>
+<div id="results" hidden></div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 <script type="module" src="./main.js"></script>
 </body>
 </html>

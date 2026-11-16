@@ -1,8 +1,10 @@
 // O-Level Science Lab VR
 // An original WebXR lab with five core O-Level practicals. Runs in the Meta Quest
 // Browser (WebXR) and in any desktop browser (mouse + keyboard).
-import * as THREE from './vendor/three.module.min.js';
+import * as THREE from 'three';
 import { VRButton } from './vendor/VRButton.js';
+import { createXRInput, inputWords } from '../shared/xr-input.js';
+import { createDebugHud } from '../shared/debug-hud.js';
 
 // ---------------------------------------------------------------- renderer / scene
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -29,6 +31,28 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x8a96a3, 2.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 sun.position.set(3, 6, 2);
 scene.add(sun);
+
+// ---------------------------------------------------------------- hands-first input (shared/xr-input.js)
+// Hands and controllers work the same way: poke buttons, pinch (or trigger) on apparatus to pick it
+// up or use it, and point + pinch for things out of reach. Held tools stay in the hand (sticky hold).
+const settings = { smoothWalk: false };
+const input = createXRInput({
+  renderer, scene, camera, parent: rig,
+  pickRay: (ray) => hitTest(ray.origin, ray.direction),
+  onRaySelect: (p, hit) => activate(hit.root, p),
+  onHeldPress: (p, source, hit) => heldPress(p, hit),
+  heldFocus: (p) => (held.obj && held.hand === p ? toolTarget()?.obj ?? null : null),
+  sound: (n) => { ac(); if (n === 'click') sfx.tick(); },
+  onKindChange: () => { if (stations.length === 5) { updateWelcome(); stations.forEach((s) => s.render()); } },
+});
+const hud = createDebugHud({ renderer, camera, input });
+// How to say "use it" for the input in hand.
+function useOn(t) {
+  const k = input.kind;
+  if (k === 'hand') return `bring its tip to ${t} and pinch, or point at ${t} and pinch`;
+  if (k === 'controller') return `bring its tip to ${t} and pull the trigger, or point at ${t}`;
+  return `click ${t}`;
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -121,9 +145,12 @@ function label(text, { w = 0.12, h = 0.04, bg = '#ffffff', fg = '#13293d', font 
 function button(text, w, h, { bg = '#1f6fb2', fg = '#ffffff', font = 'bold 40px system-ui, sans-serif' } = {}) {
   font = font.replace(/(\d+)px/, (_, n) => `${n * 2}px`); // canvas is drawn at 2x resolution
   const g = new THREE.Group();
+  const face = new THREE.Group(); // the part that sinks when poked
   const back = mesh(new THREE.BoxGeometry(w, h, 0.02), mat(0x23384d), 0, 0, -0.011);
   const p = canvasPlane(w, h, 1400);
-  g.add(back, p.mesh);
+  face.add(back, p.mesh);
+  g.add(face);
+  g.userData.face = face; g.userData.size = { w, h }; g.userData.isButton = true;
   g.userData.draw = (t, color = bg) => {
     const { ctx, c } = p;
     ctx.clearRect(0, 0, c.width, c.height);
@@ -234,9 +261,12 @@ buildRoom();
 
 // ---------------------------------------------------------------- interaction registry
 const interactables = []; // root objects that can be selected
-function makeInteractive(obj, { id, name, station = null, action = null, tool = false }) {
+function makeInteractive(obj, { id, name, station = null, action = null, tool = false, near = true }) {
   obj.userData.interactive = { id, name, station, action, tool };
   interactables.push(obj);
+  // close up: buttons are poked, everything else is pinched (trigger or grip on controllers)
+  if (obj.userData.isButton) input.addPokable(obj, { onPress: (p) => activate(obj, p) });
+  else if (near) input.addNearTarget(obj, { onPinch: (p) => activate(obj, p) });
 }
 function findInteractive(o) {
   while (o) { if (o.userData.interactive) return o; o = o.parent; }
@@ -351,6 +381,7 @@ function dropper(color) {
   const col = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.14, 8), new THREE.MeshBasicMaterial({ visible: false }), 0, 0.07, 0);
   g.add(col);
   g.userData.tipColor = color;
+  g.userData.gripY = 0.1;   // held by the bulb, tip down
   return g;
 }
 function bottle(color, text) {
@@ -418,6 +449,7 @@ function splint() {
   g.add(ember);
   g.add(mesh(new THREE.BoxGeometry(0.04, 0.19, 0.04), new THREE.MeshBasicMaterial({ visible: false }), 0, 0.085, 0)); // collider
   g.userData.flame = fl; g.userData.ember = ember; g.userData.tip = tip;
+  g.userData.gripY = 0.13;
   return g;
 }
 function stand(height = 0.75) {
@@ -493,19 +525,25 @@ camera.add(desktopHold);
 function storeHome(obj) {
   obj.userData.home = { parent: obj.parent, pos: obj.position.clone(), quat: obj.quaternion.clone() };
 }
+// In VR a held tool hangs from the hand's hold anchor (shared/xr-input.js). The anchor stays put if
+// tracking drops, so a tool is never hidden or lost when a hand leaves view.
 async function pickUp(station, id, hand) {
   const obj = station.objects[id];
   if (held.obj) await putBack();
   held.obj = obj; held.station = station; held.id = id; held.hand = hand;
-  const holder = hand && hand.userData.holdPoint ? hand.userData.holdPoint : desktopHold;
+  const anchor = hand && hand.anchor;
+  if (anchor) hand.held = obj;
+  const holder = anchor || desktopHold;
   holder.attach(obj);
   const p0 = obj.position.clone(); const q0 = obj.quaternion.clone();
+  const p1 = new THREE.Vector3(0, anchor ? -(obj.userData.gripY || 0) : 0, 0);
   const q1 = new THREE.Quaternion();
   sfx.whoosh();
-  await tween(0.35, (k) => { obj.position.lerpVectors(p0, new THREE.Vector3(), k); obj.quaternion.slerpQuaternions(q0, q1, k); });
+  await tween(0.3, (k) => { obj.position.lerpVectors(p0, p1, k); obj.quaternion.slerpQuaternions(q0, q1, k); });
 }
 async function putBack() {
   const obj = held.obj; if (!obj) return;
+  if (held.hand && held.hand.anchor) held.hand.held = null;
   held.obj = null; held.station = null; held.id = null; held.hand = null;
   const home = obj.userData.home;
   home.parent.attach(obj);
@@ -519,6 +557,27 @@ async function bringTo(obj, worldPos, dur = 0.5) {
   const q1 = new THREE.Quaternion();
   await tween(dur, (k) => { obj.position.lerpVectors(p0, worldPos, k); obj.quaternion.slerpQuaternions(q0, q1, k); });
 }
+// While a tool is held: its tip (the tool's local origin) near a target means "use it here".
+const TOOL_REACH = 0.05;
+const _tip = new THREE.Vector3();
+function toolTarget() {
+  if (!held.obj) return null;
+  held.obj.getWorldPosition(_tip);
+  return input.nearestTarget(_tip, TOOL_REACH, held.obj);
+}
+// A pinch (or trigger) by the hand that holds a tool.
+function heldPress(p, rayHit) {
+  if (p.held === goggles) { dropGoggles(); return; }   // pinch again before reaching the face: put them down
+  if (!held.obj || held.hand !== p) { p.held = null; return; }
+  const t = toolTarget() || input.nearestTarget(p.pinchPoint, input.TUNING.grabRadius, held.obj);
+  if (t) {
+    if (t.obj.userData.interactive?.id === held.id && t.obj !== held.obj) { putBack(); return; }  // back on its bottle
+    return activate(t.obj, p);
+  }
+  if (rayHit) return activate(rayHit.root, p);
+  putBack();   // pinch in empty air: put the tool back
+}
+
 function topOf(obj, above = 0.03) {
   const box = new THREE.Box3().setFromObject(obj);
   const c = box.getCenter(new THREE.Vector3());
@@ -570,29 +629,41 @@ class Station {
     const sign = label(`${this.index + 1}. ${this.def.short}`, { w: 1.1, h: 0.16, bg: this.def.colour, fg: '#fff', font: 'bold 90px system-ui, sans-serif', res: 500 });
     sign.position.set(0, 2.25, -0.52);
     g.add(sign);
-    // quiz buttons to the right of the board
+    // quiz answer buttons: on the front of the bench, within reach (shown only for the question)
     this.quizButtons = [0, 1, 2].map((i) => {
-      const b = button('', 0.52, 0.2, { font: 'bold 30px system-ui, sans-serif' });
-      b.position.set(0.99, 1.92 - i * 0.24, -0.45);
-      b.rotation.y = -0.35;
+      const b = button('', 0.36, 0.11, { font: 'bold 22px system-ui, sans-serif' });
+      b.position.set(-0.5 + i * 0.4, 1.0, 0.36);
+      b.rotation.x = -Math.PI / 2 + 0.8;
       g.add(b);
       makeInteractive(b, { id: 'opt' + i, name: 'Answer ' + 'ABC'[i], station: this });
       b.visible = false;
       return b;
     });
-    // reset button on the front-left of the bench
-    const r = button('↺ Restart bench', 0.34, 0.09, { bg: '#7a8793', font: 'bold 30px system-ui, sans-serif' });
-    r.position.set(-0.85, 0.93, 0.3);
+    // control strip along the front edge: restart on the left, bench navigation on the right
+    const r = button('↺ Restart bench', 0.26, 0.08, { bg: '#7a8793', font: 'bold 26px system-ui, sans-serif' });
+    r.position.set(-0.86, 0.93, 0.34);
     r.rotation.x = -Math.PI / 2 + 0.5;
     g.add(r);
     makeInteractive(r, { id: 'reset', name: 'Restart this practical', station: this });
+    const nav = [
+      ['◀ Prev', `Go to bench ${((this.index + 4) % 5) + 1}`, () => goToStation((this.index + 4) % 5)],
+      ['⌂ Start', 'Go back to the start', () => goHome()],
+      ['Next ▶', `Go to bench ${((this.index + 1) % 5) + 1}`, () => goToStation((this.index + 1) % 5)],
+    ];
+    nav.forEach(([text, name, fn], i) => {
+      const b = button(text, 0.12, 0.08, { bg: '#2e5d7a', font: 'bold 24px system-ui, sans-serif' });
+      b.position.set(0.585 + i * 0.15, 0.93, 0.34);
+      b.rotation.x = -Math.PI / 2 + 0.5;
+      g.add(b);
+      makeInteractive(b, { id: 'nav' + i, name, action: fn });
+    });
     // teleport pad in front of the bench
     const pad = mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.02, 32), new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.55 }), 0, 0.01, 1.05);
     g.add(pad);
     const padLabel = label(`Bench ${this.index + 1}`, { w: 0.4, h: 0.1, bg: 'rgba(0,0,0,0)', fg: '#0f5132', font: 'bold 60px system-ui, sans-serif', res: 500 });
     padLabel.rotation.x = -Math.PI / 2; padLabel.position.set(0, 0.025, 1.05);
     g.add(padLabel);
-    makeInteractive(pad, { id: 'pad', name: `Go to bench ${this.index + 1}: ${this.def.short}`, action: () => goToStation(this.index) });
+    makeInteractive(pad, { id: 'pad', name: `Go to bench ${this.index + 1}: ${this.def.short}`, action: () => goToStation(this.index), near: false });
     this.pad = pad;
     // "next" arrow
     this.arrow = mesh(new THREE.ConeGeometry(0.025, 0.06, 12), new THREE.MeshBasicMaterial({ color: 0xffc107 }));
@@ -641,7 +712,7 @@ class Station {
     if (id === 'reset') { sfx.click(); return this.reset(); }
     if (this.quiz) {
       if (id.startsWith('opt')) return this.answer(parseInt(id.slice(3), 10));
-      this.say('Answer the question on the board using the buttons on the right.');
+      this.say('Answer the question on the board with the answer buttons at the front of the bench.');
       return;
     }
     const s = this.step;
@@ -655,13 +726,13 @@ class Station {
     if (s.pick) {
       if (held.id === s.pick && held.station === this) {
         if (id === s.target) return this.run(s);
-        if (id === s.pick) { this.say(`You are holding the ${s.pickName}. Now point at ${s.targetName}.`); return; }
+        if (id === s.pick) { this.say(`You are holding the ${s.pickName}. Now ${useOn(s.targetName)}.`); return; }
       }
       if (id === s.pick || isTool) {
         this.busy = true;
         await pickUp(this, id, hand);
         this.busy = false;
-        if (id === s.pick) this.say(`Holding the ${s.pickName}. Now point at ${s.targetName} and select it.`);
+        if (id === s.pick) this.say(`Holding the ${s.pickName}. Now ${useOn(s.targetName)}.`);
         else { sfx.bad(); this.say(`That is not the right tool for this step. You need the ${s.pickName}.`, 'warn'); }
         return;
       }
@@ -868,6 +939,7 @@ const titration = {
     pip.add(mesh(new THREE.SphereGeometry(0.013, 12, 8), mat(0x2e86c1), 0, 0.29, 0)); // pipette filler
     pip.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 8), new THREE.MeshBasicMaterial({ visible: false }), 0, 0.15, 0));
     pip.rotation.z = Math.PI / 2;
+    pip.userData.gripY = 0.2;
     st.add('pipette', pip, '25.0 cm³ pipette', -0.25, 0.915, 0.25, { tool: true });
     st.add('naohBeaker', beaker(0.04, 0.08, 0xeef6ff, 0.6), 'Beaker of NaOH(aq)', -0.35, 0.9, 0.05, { alias: 'pipette', tool: true });
     st.add('moBottle', bottle(0xe67e22, 'Methyl orange'), 'Methyl orange indicator', -0.1, 0.9, 0.08, { alias: 'mo', tool: true });
@@ -995,6 +1067,7 @@ const gasTests = {
     st.add('glow', s2, 'Glowing splint', -0.42, 0.91, 0.3, { tool: true });
     const lw = testTube({ r: 0.018, h: 0.15, color: 0xeef6f8, level: 0.5, opacity: 0.45 });
     lw.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.16, 8), new THREE.MeshBasicMaterial({ visible: false }), 0, 0.08, 0));
+    lw.userData.gripY = 0.11;
     st.add('limewater', lw, 'Limewater (calcium hydroxide solution)', 0.35, 0.91, 0.12, { tool: true });
     st.addStatic(rack(1, 0.07), 0.35, 0.89, 0.12);
   },
@@ -1197,26 +1270,55 @@ welcomeGroup.add(mesh(new THREE.BoxGeometry(1.68, 1.23, 0.04), mat(0x23384d), 0,
 welcome.mesh.position.set(0, 1.62, 0);
 welcomeGroup.add(welcome.mesh);
 welcomeGroup.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.0, 8), mat(0x23384d), 0, 0.5, -0.05));
-// goggles on a small table: the first "tutorial" interaction
-welcomeGroup.add(mesh(new THREE.BoxGeometry(0.5, 0.86, 0.4), mat(0x7b8f9c), 0.55, 0.43, 0.45));
+// start table in front of the board: bench buttons, smooth-walk switch and the goggles, all within reach
+welcomeGroup.add(mesh(new THREE.BoxGeometry(1.8, 0.86, 0.45), mat(0x7b8f9c), 0, 0.43, 0.55));
 const goggles = new THREE.Group();
 goggles.add(mesh(new THREE.TorusGeometry(0.03, 0.008, 8, 20), mat(0x2e86c1), -0.035, 0, 0));
 goggles.add(mesh(new THREE.TorusGeometry(0.03, 0.008, 8, 20), mat(0x2e86c1), 0.035, 0, 0));
 goggles.add(mesh(new THREE.BoxGeometry(0.16, 0.06, 0.06), new THREE.MeshBasicMaterial({ visible: false })));
 goggles.rotation.x = -Math.PI / 2 + 0.3;
-goggles.position.set(0.55, 0.9, 0.45);
+goggles.position.set(0.45, 0.9, 0.68);
 welcomeGroup.add(goggles);
-makeInteractive(goggles, { id: 'goggles', name: 'Safety goggles: put them on', action: () => {
+const gogglesHome = { pos: goggles.position.clone(), quat: goggles.quaternion.clone() };
+function putOnGoggles() {
   progress.goggles = true; goggles.visible = false; sfx.good(); updateWelcome();
+  if (gogglesHand) { gogglesHand.held = null; gogglesHand = null; }
+}
+// Pointing at the goggles (or clicking) puts them on at once. Pinching them close up picks them up:
+// bring them to your face to put them on, which teaches pick-up before the first practical.
+let gogglesHand = null;
+makeInteractive(goggles, { id: 'goggles', name: 'Safety goggles: put them on', action: putOnGoggles, near: false });
+input.addNearTarget(goggles, { onPinch: (p) => {
+  if (progress.goggles) return;
+  gogglesHand = p; p.held = goggles;
+  p.anchor.attach(goggles);
+  const p0 = goggles.position.clone(), q0 = goggles.quaternion.clone();
+  tween(0.25, (k) => { goggles.position.lerpVectors(p0, new THREE.Vector3(0, 0, 0), k); goggles.quaternion.slerpQuaternions(q0, new THREE.Quaternion(), k); });
 } });
+function dropGoggles() {
+  if (!gogglesHand) return;
+  gogglesHand.held = null; gogglesHand = null;
+  welcomeGroup.attach(goggles);
+  goggles.position.copy(gogglesHome.pos); goggles.quaternion.copy(gogglesHome.quat);
+}
 const gArrow = mesh(new THREE.ConeGeometry(0.03, 0.07, 12), new THREE.MeshBasicMaterial({ color: 0xffc107 }));
 gArrow.rotation.x = Math.PI; gArrow.userData.noHit = true;
 scene.add(gArrow);
-// "go to bench" buttons on the welcome board
+// smooth walking (left thumbstick) is off unless the learner turns it on
+const walkBtn = button('', 0.34, 0.08, { bg: '#5b6b78', font: 'bold 24px system-ui, sans-serif' });
+walkBtn.position.set(-0.45, 0.93, 0.66);
+walkBtn.rotation.x = -Math.PI / 2 + 0.5;
+welcomeGroup.add(walkBtn);
+makeInteractive(walkBtn, { id: 'walk', name: 'Smooth walking with the left thumbstick', action: () => { settings.smoothWalk = !settings.smoothWalk; drawWalkBtn(); } });
+function drawWalkBtn() { walkBtn.userData.draw(`Thumbstick walking: ${settings.smoothWalk ? 'ON' : 'OFF'}`, settings.smoothWalk ? '#1e8449' : '#5b6b78'); }
+drawWalkBtn();
+// "go to bench" buttons on the start table
 const goButtons = [];
 function updateWelcome() {
   const { ctx, c } = welcome;
   const W = c.width, H = c.height;
+  const k = input.kind;
+  const w = inputWords(k);
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#fbfcfd'; roundRect(ctx, 0, 0, W, H, 18); ctx.fill();
   ctx.fillStyle = '#1d4e6e'; roundRect(ctx, 0, 0, W, 100, 18); ctx.fill(); ctx.fillRect(0, 70, W, 30);
@@ -1228,15 +1330,27 @@ function updateWelcome() {
   y += 8;
   ctx.font = 'bold 28px system-ui, sans-serif'; ctx.fillText('How to use the lab', 28, y); y += 36;
   ctx.font = '26px system-ui, sans-serif';
-  for (const line of [
-    'Point your laser and pull the TRIGGER (or pinch) to use something.',
+  const lines = k === 'hand' ? [
+    'TOUCH buttons with your fingertip. PINCH a tool to pick it up; it stays in your hand.',
+    'Bring the tool to its target and PINCH again to use it. Pinch in empty air to put it back.',
+    'For things out of reach, point with your hand and PINCH. Follow the YELLOW ARROW.',
+    'Use the bench buttons (Prev, Start, Next) or a green floor pad to move between benches.',
+  ] : k === 'controller' ? [
+    'TOUCH buttons with the controller tip, or point and pull the TRIGGER.',
+    'Pull the trigger or squeeze the GRIP on a tool to pick it up. Use it the same way at the target.',
     'Follow the YELLOW ARROW: it shows what to use next.',
-    'Point at a GREEN floor pad and pull the trigger to move there.',
-    'Right thumbstick turns you. Left thumbstick walks (optional).',
-  ]) y = wrapText(ctx, '• ' + line, 34, y, W - 70, 31);
+    'Move with the bench buttons or a green floor pad. Right thumbstick turns you.',
+  ] : [
+    'Click things to use them. Follow the YELLOW ARROW: it shows what to use next.',
+    'In VR you can use your hands: touch buttons, pinch tools to pick them up, pinch again to use them.',
+    'Drag to look around. Keys 1 to 5 jump to a bench, H returns here.',
+  ];
+  for (const line of lines) y = wrapText(ctx, '• ' + line, 34, y, W - 70, 31);
   y += 10;
   ctx.fillStyle = progress.goggles ? '#1e8449' : '#a93226'; ctx.font = 'bold 28px system-ui, sans-serif';
-  y = wrapText(ctx, progress.goggles ? '✓ Safety goggles on. Choose a bench below.' : 'Safety first: point at the GOGGLES on the table to your right and put them on.', 28, y, W - 56, 34);
+  const gog = k === 'hand' ? 'PINCH the goggles on the table and bring them up to your face.'
+    : k === 'controller' ? 'Point at the GOGGLES on the table and pull the trigger.' : 'Click the GOGGLES on the table to put them on.';
+  y = wrapText(ctx, progress.goggles ? '✓ Safety goggles on. Choose a bench with the buttons on the table.' : 'Safety first: ' + gog, 28, y, W - 56, 34);
   y += 6;
   ctx.fillStyle = '#13293d'; ctx.font = 'bold 28px system-ui, sans-serif';
   const done = stations.filter((s) => s.completed).length;
@@ -1244,84 +1358,97 @@ function updateWelcome() {
   ctx.fillText(`Progress: ${done}/5 practicals complete   •   First-try answers: ${score}/5`, 28, y);
   welcome.update();
   goButtons.forEach((b, i) => { const s = stations[i]; b.userData.draw(`${s.completed ? '✓ ' : ''}${i + 1}. ${s.def.short}`, s.completed ? '#1e8449' : s.def.colour); });
+  updatePageResults();
+}
+// Results stay on the web page after leaving VR, so a teacher can note them.
+function updatePageResults() {
+  const el = document.getElementById('results'); if (!el) return;
+  const done = stations.filter((s) => s.completed);
+  if (!done.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = '<b>Results this visit</b><br>' + stations.map((s, i) =>
+    `${i + 1}. ${s.def.short}: ${s.completed ? (s.score ? 'complete, question right first time' : 'complete') : 'not done'}`).join('<br>');
 }
 
 // ---------------------------------------------------------------- moving around
 const hubPad = mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.02, 32), new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.45 }), 0, 0.01, 0);
 scene.add(hubPad);
-makeInteractive(hubPad, { id: 'hub', name: 'Go to the start (welcome board)', action: () => goHome() });
+makeInteractive(hubPad, { id: 'hub', name: 'Go to the start (welcome board)', action: () => goHome(), near: false });
 
+const STAND_VR = 0.72;      // in VR the head stands this far from a bench centre: apparatus is 0.45 to 0.7 m away
+const STAND_DESKTOP = 1.05;
+const HOME_VR = new THREE.Vector3(0, 0, STATION_RADIUS - 1.05);   // just behind the start table
+const HOME_DESKTOP = new THREE.Vector3(0, 0, 1.6);
+let place = { kind: 'home', index: -1 };
+
+// 150 ms fade through black on every move in VR, so there is no visible jump.
+const fadeSphere = mesh(new THREE.SphereGeometry(0.2, 16, 12), new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide, transparent: true, opacity: 0, depthTest: false }));
+fadeSphere.renderOrder = 1002; fadeSphere.visible = false; fadeSphere.userData.noHit = true;
+camera.add(fadeSphere);
+let fadeBusy = false;
+async function fadeMove(fn) {
+  if (!renderer.xr.isPresenting || fadeBusy) { fn(); return; }
+  fadeBusy = true; fadeSphere.visible = true;
+  await tween(0.075, (k) => (fadeSphere.material.opacity = k), (k) => k);
+  fn();
+  await tween(0.075, (k) => (fadeSphere.material.opacity = 1 - k), (k) => k);
+  fadeSphere.visible = false; fadeBusy = false;
+}
+// Put the learner's head (not the play-space origin) at pos, facing yaw.
 function placeRig(pos, yaw) {
-  rig.position.copy(pos);
-  rig.rotation.set(0, yaw, 0);
-  if (!renderer.xr.isPresenting) camera.rotation.set(-0.15, 0, 0);
+  if (renderer.xr.isPresenting) input.placeRig(rig, pos.x, pos.z, yaw);
+  else { rig.position.copy(pos); rig.rotation.set(0, yaw, 0); camera.rotation.set(-0.15, 0, 0); }
 }
-function goToStation(i) {
+function benchSpot(i) {
   const st = stations[i];
-  const p = st.group.localToWorld(new THREE.Vector3(0, 0, 1.05));
+  const p = st.group.localToWorld(new THREE.Vector3(0, 0, renderer.xr.isPresenting ? STAND_VR : STAND_DESKTOP));
   p.y = 0;
-  placeRig(p, st.angle);
-  sfx.whoosh();
+  return p;
 }
-function goHome() { placeRig(new THREE.Vector3(0, 0, 1.6), Math.PI); }
+function goToStation(i, instant = false) {
+  place = { kind: 'bench', index: i };
+  if (gogglesHand) dropGoggles();
+  const move = () => placeRig(benchSpot(i), stations[i].angle);
+  if (!instant) sfx.whoosh();
+  if (instant) move(); else fadeMove(move);
+}
+function goHome(instant = false) {
+  place = { kind: 'home', index: -1 };
+  const move = () => placeRig((renderer.xr.isPresenting ? HOME_VR : HOME_DESKTOP).clone(), Math.PI);
+  if (instant) move(); else fadeMove(move);
+}
+// Start in front of the learner, and again when they recentre the headset.
+input.onRecenter((head) => {
+  input.setLiftFromHead(head);
+  if (place.kind === 'bench') goToStation(place.index, true); else goHome(true);
+});
 
 // ---------------------------------------------------------------- build stations
 [foodTests, titration, gasTests, ionTests, pendulum].forEach((def, i) => stations.push(new Station(i, def)));
 stations.forEach((s, i) => {
-  const b = button('', 0.3, 0.1, { font: 'bold 34px system-ui, sans-serif' });
-  b.position.set(-0.64 + i * 0.32, 0.95, 0.03);
+  const b = button('', 0.28, 0.09, { font: 'bold 30px system-ui, sans-serif' });
+  b.position.set(0.66 - i * 0.33, 0.93, 0.5);
+  b.rotation.x = -Math.PI / 2 + 0.5;
   welcomeGroup.add(b);
   makeInteractive(b, { id: 'go' + i, name: `Go to bench ${i + 1}: ${s.def.short}`, action: () => goToStation(i) });
   goButtons.push(b);
 });
 updateWelcome();
-goHome();
+goHome(true);
 
-// ---------------------------------------------------------------- XR controllers
-const controllers = [];
-const rayGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
-for (let i = 0; i < 2; i++) {
-  const c = renderer.xr.getController(i);
-  const line = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 }));
-  line.scale.z = 3;
-  line.userData.noHit = true;
-  c.add(line);
-  const dot = mesh(new THREE.SphereGeometry(0.008, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-  dot.userData.noHit = true;
-  c.add(dot);
-  const holdPoint = new THREE.Object3D();
-  holdPoint.position.set(0, -0.03, -0.12);
-  holdPoint.rotation.x = -0.6;
-  c.add(holdPoint);
-  c.userData = { line, dot, holdPoint, hover: null };
-  c.addEventListener('connected', (e) => { c.userData.inputSource = e.data; c.visible = true; });
-  c.addEventListener('disconnected', () => { c.visible = false; c.userData.inputSource = null; });
-  c.addEventListener('select', () => { const h = c.userData.hover; if (h) activate(h.root, c); });
-  rig.add(c);
-  controllers.push(c);
-}
-const tmpM = new THREE.Matrix4(), tmpO = new THREE.Vector3(), tmpD = new THREE.Vector3();
-function updateControllers() {
-  let shown = null;
-  for (const c of controllers) {
-    if (!c.visible || !c.userData.inputSource) continue;
-    tmpM.identity().extractRotation(c.matrixWorld);
-    tmpO.setFromMatrixPosition(c.matrixWorld);
-    tmpD.set(0, 0, -1).applyMatrix4(tmpM);
-    const hit = hitTest(tmpO, tmpD);
-    c.userData.hover = hit;
-    const len = hit ? hit.distance : 3;
-    c.userData.line.scale.z = len;
-    c.userData.line.material.color.set(hit ? 0xffc107 : 0xffffff);
-    c.userData.dot.position.set(0, 0, -len);
-    c.userData.dot.visible = !!hit;
-    if (hit && !shown) shown = hit;
+// ---------------------------------------------------------------- VR hover label
+function updateXRHover() {
+  let root = null, point = null;
+  for (const p of input.pointers) {
+    if (p.hover) { root = p.hover.root; point = p.hover.point; break; }
+    if (p.focus && p.focus.userData.interactive) { root = p.focus; point = topOf(p.focus, 0.0); break; }
   }
-  showHover(shown?.root, shown?.point);
+  showHover(root, point);
 }
 
-// thumbsticks: left = smooth walk, right = snap turn
+// thumbsticks: right = snap turn; left = smooth walk, only if switched on at the start table
 let snapReady = true;
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
 function updateThumbsticks(dt) {
   const session = renderer.xr.getSession();
   if (!session) return;
@@ -1329,10 +1456,10 @@ function updateThumbsticks(dt) {
     const gp = src.gamepad; if (!gp || gp.axes.length < 4) continue;
     const x = gp.axes[2], y = gp.axes[3];
     if (src.handedness === 'left') {
-      if (Math.abs(x) > 0.2 || Math.abs(y) > 0.2) {
-        const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-        const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
-        rig.position.addScaledVector(fwd, -y * 1.4 * dt).addScaledVector(right, x * 1.4 * dt);
+      if (settings.smoothWalk && (Math.abs(x) > 0.2 || Math.abs(y) > 0.2)) {
+        camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+        _right.set(-_fwd.z, 0, _fwd.x);
+        rig.position.addScaledVector(_fwd, -y * 1.4 * dt).addScaledVector(_right, x * 1.4 * dt);
         clampRig();
       }
     } else if (src.handedness === 'right') {
@@ -1345,7 +1472,6 @@ function snapTurn(a) {
   const head = new THREE.Vector3(); camera.getWorldPosition(head);
   rig.position.sub(head).applyAxisAngle(new THREE.Vector3(0, 1, 0), a).add(head);
   rig.rotation.y += a;
-  head.y = 0;
 }
 function clampRig() {
   rig.position.x = THREE.MathUtils.clamp(rig.position.x, -6.5, 6.5);
@@ -1382,8 +1508,8 @@ function desktopClick() { const h = desktopRay(); if (h) activate(h.root, null);
 const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
-  if (/^Digit[1-5]$/.test(e.code)) goToStation(parseInt(e.code.slice(5), 10) - 1);
-  if (e.code === 'KeyH') goHome();
+  if (/^Digit[1-5]$/.test(e.code)) goToStation(parseInt(e.code.slice(5), 10) - 1, true);
+  if (e.code === 'KeyH') goHome(true);
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 function updateDesktop(dt) {
@@ -1406,6 +1532,12 @@ document.getElementById('helpToggle')?.addEventListener('click', (e) => {
   e.target.textContent = h.classList.contains('min') ? 'Show help' : 'Hide help';
 });
 renderer.xr.addEventListener('sessionstart', () => { document.getElementById('help')?.classList.add('min'); camera.rotation.set(0, 0, 0); });
+renderer.xr.addEventListener('sessionend', () => {
+  if (gogglesHand) dropGoggles();
+  rig.position.y = 0;
+  if (place.kind === 'bench') goToStation(place.index, true); else goHome(true);
+  updateWelcome();
+});
 
 // ---------------------------------------------------------------- main loop
 const clock = new THREE.Clock();
@@ -1414,7 +1546,12 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   time += dt;
   updateTweens(dt * (window.lab?.speed || 1));
-  if (renderer.xr.isPresenting) { updateThumbsticks(dt); updateControllers(); } else updateDesktop(dt);
+  input.update();
+  if (renderer.xr.isPresenting) { updateThumbsticks(dt); updateXRHover(); } else updateDesktop(dt);
+  if (gogglesHand) {   // goggles brought up to the face go on
+    const hp = camera.getWorldPosition(_tip);
+    if (goggles.getWorldPosition(new THREE.Vector3()).distanceTo(hp) < 0.2) putOnGoggles();
+  }
   for (const st of stations) {
     const t = st.arrowTarget();
     st.arrow.visible = !!t && !st.busy;
@@ -1423,7 +1560,9 @@ renderer.setAnimationLoop(() => {
   gArrow.visible = !progress.goggles;
   if (gArrow.visible) { const p = goggles.getWorldPosition(new THREE.Vector3()); gArrow.position.set(p.x, p.y + 0.1 + Math.sin(time * 4) * 0.015, p.z); }
   renderer.render(scene, camera);
+  hud.update();
 });
 
 // Test hook (used by the automated browser test; harmless for players).
-window.lab = { stations, goToStation, goHome, held, progress, activateById(stIndex, id) { return stations[stIndex].click(id, null); }, scene, camera, rig, THREE };
+window.lab = { stations, goToStation, goHome, held, progress, activateById(stIndex, id) { return stations[stIndex].click(id, null); }, scene, camera, rig, THREE,
+  input, interactables, settings, heldPress, toolTarget, renderer };
