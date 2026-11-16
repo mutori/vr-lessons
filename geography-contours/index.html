@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading the Land: Contours and Relief</title>
+<meta name="description" content="Form 2 Geography (Zimbabwe) VR lesson: build contour lines, flatten a hill into a map, find landforms and test yourself. Runs in the Meta Quest browser.">
+<style>
+  :root { --ink:#1d2a1f; --paper:#f6f1e3; --accent:#b5651d; --btn:#2f6b3a; }
+  html,body { margin:0; height:100%; background:#0e1a12; color:var(--paper); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
+  #app { position:fixed; inset:0; }
+  #overlay { position:fixed; left:0; right:0; bottom:0; padding:14px 16px 18px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center;
+             background:linear-gradient(transparent, rgba(0,0,0,.75)); pointer-events:none; }
+  #overlay > * { pointer-events:auto; }
+  #enter { font-size:20px; font-weight:700; padding:14px 26px; border-radius:12px; border:0; background:var(--btn); color:#fff; cursor:pointer; }
+  #enter[disabled] { background:#555; cursor:default; }
+  #hint { font-size:14px; max-width:640px; text-align:center; opacity:.9; line-height:1.4; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; font-size:18px; }
+</style>
+</head>
+<body>
+<div id="loading">Loading the landscape…</div>
+<div id="app"></div>
+<div id="overlay">
+  <button id="enter" disabled>Checking for VR…</button>
+  <div id="hint">On a Meta Quest: press <b>Enter VR</b>. On a computer: drag to look around, scroll to zoom, click the buttons on the board.</div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
