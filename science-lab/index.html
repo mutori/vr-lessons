@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>O-Level Science Lab VR</title>
+<meta name="description" content="A WebXR science lab where O-Level students carry out five core practicals. Works in the Meta Quest Browser and on desktop.">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe7ee; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas { display: block; touch-action: none; }
+  #help {
+    position: absolute; top: 12px; left: 12px; max-width: 360px;
+    background: rgba(16, 32, 48, 0.86); color: #fff; padding: 12px 14px; border-radius: 10px;
+    font-size: 13px; line-height: 1.45; user-select: none;
+  }
+  #help h1 { font-size: 16px; margin: 0 0 6px; }
+  #help kbd { background: #34506b; border-radius: 4px; padding: 0 5px; font-family: inherit; }
+  #help button { margin-top: 6px; background: #34506b; color: #fff; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  #help.min p, #help.min ul { display: none; }
+  #help ul { margin: 4px 0; padding-left: 18px; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #234; font-size: 18px; }
+</style>
+</head>
+<body>
+<div id="loading">Loading the lab…</div>
+<div id="help">
+  <h1>O-Level Science Lab VR</h1>
+  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page.</p>
+  <ul>
+    <li>Point the laser and pull the <b>trigger</b> (or pinch with hand tracking) to use things.</li>
+    <li>Point at a <b>green floor pad</b> and pull the trigger to move to that bench.</li>
+    <li>Right thumbstick: turn. Left thumbstick: walk.</li>
+  </ul>
+  <p>On a computer: <b>click</b> to use, <b>drag</b> to look, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to walk, <kbd>1</kbd>–<kbd>5</kbd> jump to a bench, <kbd>H</kbd> back to the start.</p>
+  <button id="helpToggle">Hide help</button>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
