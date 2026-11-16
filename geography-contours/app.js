@@ -443,6 +443,12 @@ function phrase(key) {
       mouse: 'click a button on the board.' },
     touchPin: { hand: 'Touch a pin with your fingertip, or point at it and pinch,', controller: 'Touch a pin with the controller tip, or point at it and pull the trigger,', mouse: 'Click a pin' },
     touchLand: { hand: 'Touch the spot with your fingertip, or point at it and pinch.', controller: 'Touch the spot with the controller tip, or point at it and pull the trigger.', mouse: 'Click on it.' },
+    lift: { hand: 'Pinch the BLUE handle at the left corner of the table and lift it slowly: the water follows your hand. Or press "Raise water".',
+      controller: 'Squeeze the grip on the BLUE handle at the left corner of the table and lift it slowly: the water follows. Or press "Raise water".',
+      mouse: 'Press "Raise water" to lift the water by 20 m.' },
+    squash: { hand: 'Or pinch the GREEN handle at the right corner of the table and move it up and down to squash the land at your own speed.',
+      controller: 'Or squeeze the grip on the GREEN handle at the right corner of the table and move it up and down.',
+      mouse: '' },
     turn: { hand: 'To bring far places closer, pinch the wooden edge of the model and drag it sideways.',
       controller: 'To bring far places closer, squeeze the grip on the wooden edge of the model and drag it sideways.',
       mouse: 'In VR you can turn the model by its wooden edge.' },
@@ -613,6 +619,63 @@ function pressConsole(i) {
   const b = consoleBtns[i].b;
   if (b && b.enabled !== false && b.onClick) { beep(660, 0.06); b.onClick(); }
 }
+// ---------- Map in hand at real size (G8) ----------
+// The flat contour map is rendered once to a texture at start-up, then shown on a small board beside
+// the console at real size, with a "you are here" marker and an arrow for the way you face.
+const MINIMAP = 0.22;
+const miniMapRT = new THREE.WebGLRenderTarget(1024, 1024);
+miniMapRT.texture.colorSpace = THREE.SRGBColorSpace;
+const miniMap = new THREE.Group();
+{
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(MINIMAP + 0.016, MINIMAP + 0.05), new THREE.MeshBasicMaterial({ color: 0x1d2a1f }));
+  back.position.set(0, 0.015, -0.002);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(MINIMAP, MINIMAP), new THREE.MeshBasicMaterial({ map: miniMapRT.texture }));
+  miniMap.add(back, face);
+  // header text drawn onto the back panel's top strip
+  const c = document.createElement('canvas'); c.width = 512; c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = '#f6f1e3'; x.font = 'bold 34px system-ui'; x.textBaseline = 'middle';
+  x.fillText('MAP   ▲ N', 12, 34);
+  const tt = new THREE.CanvasTexture(c); tt.colorSpace = THREE.SRGBColorSpace;
+  const title = new THREE.Mesh(new THREE.PlaneGeometry(MINIMAP, MINIMAP / 8), new THREE.MeshBasicMaterial({ map: tt, transparent: true }));
+  title.position.set(0, MINIMAP / 2 + 0.017, 0.001);
+  miniMap.add(title);
+}
+// you-are-here marker: a red arrow pointing the way the learner faces
+const youMarker = new THREE.Mesh(
+  new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(0, 0.012), new THREE.Vector2(0.008, -0.009), new THREE.Vector2(0, -0.004), new THREE.Vector2(-0.008, -0.009)])),
+  new THREE.MeshBasicMaterial({ color: 0xd92b1f }));
+youMarker.position.z = 0.002;
+miniMap.add(youMarker);
+miniMap.position.set(-0.56, 0.02, 0);
+miniMap.visible = false;
+miniMap.traverse((o) => { o.raycast = () => {}; });
+consoleGroup.add(miniMap);
+function renderMiniMap() {
+  const mapScene = new THREE.Scene();
+  mapScene.background = new THREE.Color(0xf7f2e0);
+  const flat = new THREE.Mesh(terrainGeo, terrainMat);
+  flat.scale.set(1, FLAT, 1);
+  mapScene.add(flat);
+  const cam = new THREE.OrthographicCamera(-HALF, HALF, HALF, -HALF, 1, 4000);
+  cam.position.set(0, 2000, 0); cam.up.set(0, 0, -1); cam.lookAt(0, 0, 0);
+  const U = terrainUniforms, keep = {};
+  for (const k of ['uMapMix', 'uReveal', 'uGrid', 'uHiOn', 'uNewGlow', 'uBand', 'uFogNear', 'uFogFar']) keep[k] = U[k].value;
+  U.uMapMix.value = 1; U.uReveal.value = MAX_LEVEL; U.uGrid.value = 1; U.uHiOn.value = 0; U.uNewGlow.value = 0; U.uBand.value = 0; U.uFogNear.value = 1e5; U.uFogFar.value = 2e5;
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(miniMapRT);
+  renderer.render(mapScene, cam);
+  renderer.setRenderTarget(prev);
+  for (const k in keep) U[k].value = keep[k];
+}
+function updateMiniMap() {
+  miniMap.visible = lifeSize;
+  if (!lifeSize || !viewpoint) return;
+  const vp = VIEWPOINTS[viewpoint];
+  youMarker.position.set(vp.x / (2 * HALF) * MINIMAP, -vp.z / (2 * HALF) * MINIMAP, 0.002);
+  youMarker.rotation.z = headYaw() - world.rotation.y;
+}
+
 function placeConsoleAtTable() {
   consoleGroup.position.set(0, TABLE_TOP + 0.045, TABLE_Z + TABLE_SIZE / 2 + 0.058);
   consoleGroup.rotation.set(-Math.PI / 2 + 0.75, 0, 0, 'YXZ');
@@ -832,7 +895,7 @@ function showPointMarker(hit) {
 }
 
 // ---------- Lesson steps ----------
-const state = { step: 'intro', raises: 0, prediction: null, visited: new Set(), quizIndex: 0, score: 0, answers: [] };
+const state = { step: 'intro', raises: 0, prediction: null, visited: new Set(), quizIndex: 0, score: 0, answers: [], retry: null, practised: [] };
 
 function highlight(f, on = true) {
   if (!f || !on) { terrainUniforms.uHiOn.value = 0; return; }
@@ -878,6 +941,7 @@ const STEPS = {
   flood() {
     terrainUniforms.uReveal.value = MIN_LEVEL - INTERVAL;
     water.visible = true; waterLevel = H0; water.position.y = 0.2; state.raises = 0;
+    revealed = MIN_LEVEL - INTERVAL;
     if (isFlat) flatten(false, 1200);
     renderFlood();
   },
@@ -902,7 +966,7 @@ const STEPS = {
         body: (right ? 'Well done. ' : 'The lines are actually closest on the steep east side. ') +
           'On the steep side you climb 20 m in a short distance, so the lines are squeezed together. On the gentle side you must walk much further to climb 20 m, so the lines are far apart.\n\n' +
           '**Lines close together = steep slope. Lines far apart = gentle slope.**\n\n' +
-          'Press "Raise the land" and "Flatten" a few times. Watch each line stay in the same place.',
+          'Press "Raise the land" and "Flatten" a few times. Watch each line stay in the same place. {squash}',
         buttons: [readBtn(), { label: '⇅ Raise the land', onClick: toggleFlat }, { label: 'Next ▶', onClick: () => go('features') }],
       });
       const tb = ui.buttons.find((b) => b.label.startsWith('⇅'));
@@ -927,7 +991,7 @@ const STEPS = {
   onHill() {
     const base = {
       tag: 'Station 3 · South of Dombo Hill', title: 'Which side is steeper?',
-      body: 'Look up at Dombo Hill. West is on your left, east is on your right.\n\n**Point at the STEEPER side of the hill and {select}.** Look at how close the brown lines are on each side.',
+      body: 'Look up at Dombo Hill. West is on your left, east is on your right.\n\n**Point at the STEEPER side of the hill and {select}.** Look at how close the brown lines are on each side.\n\nThe small map beside your buttons shows where you stand (red arrow).',
     };
     const btns = (done) => [readBtn(),
       { label: 'Climb to the summit ▲', style: done ? undefined : 'quiet', onClick: () => fadeThrough(() => { setLifeMode('summit'); go('summit'); }) },
@@ -964,9 +1028,9 @@ const STEPS = {
     if (!isFlat) flatten(true, 1800);
     terrainUniforms.uGrid.value = 1;
     setUI({
-      tag: 'Check your understanding', title: 'Map test: 7 questions',
+      tag: 'Check your understanding', title: `Map test: ${QUIZ.length} questions`,
       body: 'The model is now a flat topographical map, just like the maps in your exam. Some questions ask you to choose an answer. Others ask you to POINT at the map.\n\nYou get feedback after each question.',
-      buttons: [readBtn(), { label: 'Begin the test ▶', onClick: () => { state.quizIndex = 0; state.score = 0; state.answers = []; go('quiz'); } }],
+      buttons: [readBtn(), { label: 'Begin the test ▶', onClick: () => { state.quizIndex = 0; state.score = 0; state.answers = []; state.retry = null; state.practised = []; go('quiz'); } }],
     });
   },
   quiz() { renderQuestion(); },
@@ -978,6 +1042,7 @@ const STEPS = {
       tag: 'Lesson complete', title: `You scored ${s} out of ${n}`,
       body: (s === n ? 'Excellent: full marks!\n\n' : s >= n - 2 ? 'Good work.\n\n' : 'Keep practising.\n\n') +
         (wrong.length ? '**Look again at:**\n' + wrong.join('\n') + '\n\n' : '') +
+        ((state.practised || []).length ? `**Practised again:** ${state.practised.map(a => a.topic + (a.ok ? ' ✔' : ' ✘')).join(', ')}\n\n` : '') +
         '**Say these rules out loud, or explain them to a partner:**\n' +
         'Close lines = steep. Far apart = gentle. Closed rings = hill. V pointing uphill = valley. V pointing downhill = spur. Rivers flow from high contours to low ones.',
       buttons: [readBtn(), { label: '↺ Try the test again', onClick: () => go('quizIntro') }, { label: '⌂ Start lesson again', style: 'quiet', onClick: () => { terrainUniforms.uGrid.value = 0; go('intro'); } }],
@@ -1006,7 +1071,7 @@ function renderFlood() {
     body: allDone
       ? 'The water has covered every height up to ' + MAX_LEVEL + ' m. Each shoreline it left behind is a contour line. Each line joins places at the same height, 20 m apart.'
       : 'Imagine a flood. The edge of the water (the shoreline) touches the land at ONE height all the way round. That shoreline is a contour line.\n\n' +
-        'Press "Raise water" to lift the water by 20 m. Watch the new shoreline turn into a line.\n\n' +
+        '{lift} Watch each new shoreline turn into a line.\n\n' +
         `**Water level: ${waterLevel} m.   Contour lines drawn: ${drawn} of ${LEVELS}.**`,
     buttons: allDone
       ? [readBtn(), { label: 'Next ▶', onClick: () => go('predict') }]
@@ -1018,10 +1083,12 @@ let raising = false;
 function raiseWater() {
   if (raising || filling) return;
   raising = true;
-  const from = waterLevel, to = Math.min(MAX_LEVEL, (waterLevel < MIN_LEVEL ? MIN_LEVEL : waterLevel + INTERVAL));
+  const base = Math.max(waterLevel, revealed);
+  const from = water.position.y - 0.2 + H0, to = Math.min(MAX_LEVEL, (base < MIN_LEVEL ? MIN_LEVEL : base + INTERVAL));
   tween(900, e => { water.position.y = (from + (to - from) * e) - H0 + 0.2; }, () => {
     waterLevel = to; state.raises++;
-    terrainUniforms.uReveal.value = to;
+    revealed = Math.max(revealed, to);
+    terrainUniforms.uReveal.value = revealed;
     terrainUniforms.uNewLevel.value = to;
     tween(1400, e => terrainUniforms.uNewGlow.value = 1 - e * 0.6);
     beep(440 + (to - 960) * 2, 0.12);
@@ -1033,12 +1100,13 @@ let filling = false;
 function fillRest() {
   if (filling || raising) return;
   filling = true;
-  const from = waterLevel;
+  const from = water.position.y - 0.2 + H0;
   tween(2200, e => {
     const lvl = from + (MAX_LEVEL - from) * e;
     water.position.y = lvl - H0 + 0.2;
-    terrainUniforms.uReveal.value = Math.floor(lvl / INTERVAL) * INTERVAL;
-  }, () => { filling = false; waterLevel = MAX_LEVEL; terrainUniforms.uReveal.value = MAX_LEVEL; drainThen(); });
+    revealed = Math.max(revealed, Math.floor(lvl / INTERVAL) * INTERVAL);
+    terrainUniforms.uReveal.value = revealed;
+  }, () => { filling = false; waterLevel = MAX_LEVEL; revealed = MAX_LEVEL; terrainUniforms.uReveal.value = MAX_LEVEL; drainThen(); });
 }
 function drainThen() {
   const from = water.position.y;
@@ -1092,6 +1160,21 @@ const QUIZ = [
   { topic: 'Hills and spot heights', point: 'hill',
     q: 'POINT at the map: find the HIGHEST point of the land shown. {touchLand}',
     why: `The highest point is the top of Dombo Hill, inside the smallest closed ring. It is marked with a trig station: ▲ ${Math.round(PEAK.h)} m.` },
+  { topic: 'Finding a valley', point: 'valley', accept: (h) => (T.riverInfo(h.x, h.z).d < 90 && h.z < 150) || Math.hypot(h.x - F.valley.x, h.z - F.valley.z) <= F.valley.r,
+    q: 'POINT at the map: find a VALLEY, where the contours make a V that points uphill. {touchLand}',
+    why: 'The Chenga River runs along a valley in the north-east. Its contours bend into Vs that point upstream, towards higher ground.' },
+  { topic: 'Finding a spur', point: 'spur', accept: (h) => Math.hypot(h.x - F.spur.x, h.z - F.spur.z) <= 150,
+    q: 'POINT at the map: find a SPUR, a tongue of high land where the contours bend into a V that points DOWNHILL. {touchLand}',
+    why: 'South of Dombo Hill the contours bulge out into a V pointing downhill, away from the hill. That tongue of land is a spur.' },
+  { topic: 'Finding a ridge', point: 'ridge', accept: (h) => { const a = 15 * Math.PI / 180, dx = h.x - 720, dz = h.z + 450; const u = dx * Math.sin(a) - dz * Math.cos(a), v = dx * Math.cos(a) + dz * Math.sin(a); return Math.abs(v) < 100 && Math.abs(u) < 420; },
+    q: 'POINT at the map: find a RIDGE, a long narrow strip of high land. {touchLand}',
+    why: 'Nhete Ridge in the north-east shows as long, narrow loops of contour lines.' },
+  { topic: 'Finding a plateau', point: 'plateau', accept: (h) => Math.hypot(h.x - F.plateau.x, h.z - F.plateau.z) <= 230,
+    q: 'POINT at the map: find a PLATEAU, high land with a flat top. {touchLand}',
+    why: 'Tafura Plateau in the south-west has lines packed close round its edge and a wide empty space on top.' },
+  { topic: 'Reading heights', point: 'hill', accept: (h) => T.height(h.x, h.z) > 1100,
+    q: 'POINT at the map: find any place that is HIGHER than 1100 m. Use the thick 1100 m contour line. {touchLand}',
+    why: 'Anywhere inside the 1100 m contour ring around Dombo Hill is higher than 1100 m.' },
   { topic: 'Explaining contour spacing',
     q: 'A friend asks: "Why are contour lines close together on a steep slope?" Choose the best explanation.',
     options: [
@@ -1103,17 +1186,37 @@ const QUIZ = [
     why: 'Each line is one 20 m step in height. On a steep slope you pass many steps in a short distance, so the lines crowd together.' },
 ];
 
+// After the last question, each missed question is asked once more as practice (not scored).
+function quizOrder() { return [...QUIZ.keys(), ...(state.retry || [])]; }
 function renderQuestion() {
+  const order = quizOrder();
   const i = state.quizIndex;
-  if (i >= QUIZ.length) { go('done'); return; }
-  const Q = QUIZ[i];
+  if (i === QUIZ.length && !state.retry) {
+    state.retry = state.answers.map((a, k) => (a.ok ? -1 : k)).filter((k) => k >= 0);
+    if (state.retry.length) {
+      setUI({ tag: `Score ${state.score} of ${QUIZ.length}`, title: 'Practise the ones you missed',
+        body: `You missed ${state.retry.length} question${state.retry.length > 1 ? 's' : ''}. Try each one again now. These do not change your score.`,
+        buttons: [readBtn(), { label: 'Try them again ▶', onClick: () => renderQuestion() }, { label: 'Skip to my score', style: 'quiet', onClick: () => go('done') }] });
+      state.quizIndex = QUIZ.length; state.retryStarted = true;
+      return;
+    }
+  }
+  if (i >= order.length) { go('done'); return; }
+  const Q = QUIZ[order[i]];
+  const practice = i >= QUIZ.length;
   highlight(null);
   (Q.letters || []).forEach(L => letters[L].visible = true);
-  const tag = `Question ${i + 1} of ${QUIZ.length}  ·  Score ${state.score}`;
+  const tag = practice ? `Practice ${i - QUIZ.length + 1} of ${state.retry.length}` : `Question ${i + 1} of ${QUIZ.length}  ·  Score ${state.score}`;
   if (Q.point) {
     setUI({ tag, title: Q.topic, body: Q.q, buttons: [readBtn()] });
     landPointHandler = (hit) => {
       showPointMarker(hit);
+      if (Q.accept) {
+        const ok = Q.accept(hit);
+        const hgt = Math.round(T.height(hit.x, hit.z));
+        answerQuestion(ok, Q, ok ? `That spot is ${hgt} m high.` : `That spot is ${hgt} m high, and not on the right kind of land.`);
+        return;
+      }
       const f = F[Q.point];
       const d = Math.hypot(hit.x - f.x, hit.z - f.z);
       const tol = Q.point === 'hill' ? 90 : 150;
@@ -1127,17 +1230,19 @@ function renderQuestion() {
 
 function answerQuestion(ok, Q, extra, chosen) {
   landPointHandler = null;
-  if (ok) { state.score++; good(); } else bad();
-  state.answers.push({ topic: Q.topic, ok });
+  const practice = state.quizIndex >= QUIZ.length;
+  if (ok) { if (!practice) state.score++; good(); } else bad();
+  if (practice) state.practised.push({ topic: Q.topic, ok }); else state.answers.push({ topic: Q.topic, ok });
   const f = Q.show ? F[Q.show] : (Q.point ? F[Q.point] : null);
   if (f) highlight(f);
   const i = state.quizIndex;
   const correctText = Q.options ? `The answer is: ${Q.options[Q.answer]}. ` : '';
+  const more = i + 1 < quizOrder().length || (i + 1 === QUIZ.length && !state.retry && state.answers.some((a) => !a.ok));
   setUI({
-    tag: `Question ${i + 1} of ${QUIZ.length}  ·  Score ${state.score}`,
+    tag: practice ? 'Practice' : `Question ${i + 1} of ${QUIZ.length}  ·  Score ${state.score}`,
     title: ok ? '✔ Correct' : '✘ Not quite',
     body: (ok ? '' : correctText) + (extra ? extra + ' ' : '') + Q.why + (f && !ok ? '\n\nThe glowing ring shows where it is.' : ''),
-    buttons: [readBtn(), { label: i + 1 < QUIZ.length ? 'Next question ▶' : 'See my score ▶', onClick: () => { state.quizIndex++; go('quiz'); } }],
+    buttons: [readBtn(), { label: more ? 'Next question ▶' : 'See my score ▶', onClick: () => { state.quizIndex++; go('quiz'); } }],
   });
 }
 
@@ -1246,6 +1351,95 @@ input.addNearTarget(rim, {
   onRelease: () => { turn.active = null; },
 });
 
+// ---------- Handles on the table corners (hands and controllers) ----------
+// Blue: lift the flood water yourself (G5). Green: squash the land between model and map (G6).
+const HANDLE_BASE = TABLE_TOP + 0.02;
+const WATER_K = TABLE_SCALE * TABLE_EXAG;         // world metres of knob travel per metre of water
+const SQUASH_TRAVEL = 0.25;
+function makeHandle(color, x, z, travel) {
+  const g = new THREE.Group();
+  g.position.set(x, HANDLE_BASE, z);
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, travel + 0.03, 8), new THREE.MeshLambertMaterial({ color: 0x444444 }));
+  rod.position.y = (travel + 0.03) / 2;
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 16), new THREE.MeshLambertMaterial({ color: 0x333333 }));
+  const knobMat = new THREE.MeshLambertMaterial({ color, emissive: 0x000000 });
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.024, 18, 12), knobMat);
+  g.add(rod, foot, knob);
+  g.visible = false;
+  room.add(g);
+  return { g, knob, knobMat, travel, dragging: null };
+}
+const waterHandle = makeHandle(0x2f7fc1, -0.565, TABLE_Z + 0.42, (MAX_LEVEL - H0) * WATER_K);
+const squashHandle = makeHandle(0x3a9a4a, 0.565, TABLE_Z + 0.42, SQUASH_TRAVEL);
+// tick marks every 20 m on the water handle's rod, so each step reads as a contour level
+{
+  const ticks = new THREE.Group();
+  for (let L = MIN_LEVEL; L <= MAX_LEVEL; L += INTERVAL) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(L % 100 === 0 ? 0.03 : 0.018, 0.0015, 0.003), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    t.position.set(0, (L - H0) * WATER_K, 0);
+    ticks.add(t);
+  }
+  waterHandle.g.add(ticks);
+}
+function handleFrac(h, p) { return THREE.MathUtils.clamp((p.pinchPoint.y - HANDLE_BASE - h.grabOffset) / h.travel, 0, 1); }
+function bindHandle(h, onMove) {
+  input.addNearTarget(h.knob, {
+    enabled: () => h.g.visible,
+    onPinch: (p) => { h.dragging = p; h.grabOffset = p.pinchPoint.y - h.knob.getWorldPosition(new THREE.Vector3()).y; beep(520, 0.05); },
+    onDrag: (p) => onMove(handleFrac(h, p)),
+    onRelease: () => { h.dragging = null; },
+  });
+}
+// water: the level follows the knob; each 20 m crossed for the first time leaves its contour
+let revealed = MIN_LEVEL - INTERVAL;
+bindHandle(waterHandle, (f) => {
+  if (state.step !== 'flood' || raising || filling || waterLevel >= MAX_LEVEL) return;
+  const lvl = H0 + f * (MAX_LEVEL - H0);
+  water.position.y = lvl - H0 + 0.2;
+  waterNow = lvl;
+  let crossed = false;
+  while (revealed + INTERVAL <= lvl && revealed < MAX_LEVEL) {
+    revealed += INTERVAL;
+    if (revealed < MIN_LEVEL) continue;
+    crossed = true;
+    state.raises++;
+    terrainUniforms.uReveal.value = revealed;
+    terrainUniforms.uNewLevel.value = revealed;
+    terrainUniforms.uNewGlow.value = 1;
+    beep(440 + (revealed - 960) * 2, 0.12);
+  }
+  if (crossed) tween(1400, e => terrainUniforms.uNewGlow.value = 1 - e * 0.6);
+  if (crossed) {
+    waterLevel = Math.max(waterLevel, revealed);
+    if (revealed >= MAX_LEVEL) { waterHandle.dragging = null; drainThen(); }
+    else renderFlood();
+  }
+});
+// squash: the knob sets the vertical stretch directly
+bindHandle(squashHandle, (f) => {
+  if (lifeSize) return;
+  if (flatTween) { const i = tweens.indexOf(flatTween); if (i >= 0) tweens.splice(i, 1); flatTween = null; }
+  setExag(FLAT + f * (TABLE_EXAG - FLAT));
+  const flatNow = f < 0.5;
+  if (flatNow !== isFlat) {
+    isFlat = flatNow;
+    const tb = ui.buttons.find((b) => b.label.startsWith('⇅'));
+    if (tb) { tb.label = isFlat ? '⇅ Raise the land' : '⇅ Flatten to a map'; drawPanel(); }
+  }
+});
+let waterNow = H0;
+function updateHandles() {
+  waterHandle.g.visible = !lifeSize && state.step === 'flood' && water.visible && waterLevel < MAX_LEVEL;
+  squashHandle.g.visible = !lifeSize && (state.step === 'flatten' || state.step === 'features') && !flatTween;
+  if (!waterHandle.dragging) waterNow = water.position.y - 0.2 + H0;
+  waterHandle.knob.position.y = THREE.MathUtils.clamp((waterNow - H0) * WATER_K, 0, waterHandle.travel);
+  if (!squashHandle.dragging) squashHandle.knob.position.y = (exag - FLAT) / (TABLE_EXAG - FLAT) * SQUASH_TRAVEL;
+  for (const h of [waterHandle, squashHandle]) {
+    const near = h.g.visible && input.pointers.some((p) => p.tipOk && (h.dragging === p || h.knob.getWorldPosition(_tl).distanceTo(p.pinchPoint) < input.TUNING.grabRadius + 0.024));
+    h.knobMat.emissive.setHex(h.dragging ? 0x555555 : near ? 0x333333 : 0x000000);
+  }
+}
+
 // Touching the land with a fingertip answers a "point at the map" task (table model only).
 const landTouch = [{ armed: true }, { armed: true }];
 const _tl = new THREE.Vector3();
@@ -1262,16 +1456,17 @@ function nearLand(p) {
 function updateLandTouch() {
   for (const p of input.pointers) {
     const st = landTouch[p.index];
-    if (!p.tipOk || lifeSize || !landPointHandler) { st.armed = true; continue; }
-    const g = landGapAt(p.tip);
-    if (g === null) { st.armed = true; continue; }
+    const g = (p.tipOk && !lifeSize) ? landGapAt(p.tip) : null;
+    if (g === null || g > 0.03) { st.armed = true; continue; }
+    // A finger already resting on the land when a question appears must lift first.
+    if (!landPointHandler) { st.armed = false; continue; }
     if (st.armed && g < p.tipRadius + 0.004) {
       st.armed = false;
       _tl.set(_tl.x, sampleHeight(_tl.x, _tl.z), _tl.z);
       const world3 = _tl.clone().applyMatrix4(terrain.matrixWorld);
       input.haptic(p, 0.6, 30);
       landPointHandler({ x: _tl.x, z: _tl.z, world: world3 });
-    } else if (g > 0.03) st.armed = true;
+    }
   }
 }
 function updateRimGlow() {
@@ -1318,6 +1513,8 @@ renderer.setAnimationLoop((now) => {
   terrainUniforms.uNormalWorld.value.getNormalMatrix(terrain.matrixWorld);
   placeLabels();
   input.update();
+  updateHandles();
+  updateMiniMap();
   if (renderer.xr.isPresenting) { updateLandTouch(); updateRimGlow(); }
   else {
     raycaster.setFromCamera(mouse, camera);
@@ -1383,6 +1580,7 @@ function showPageResult(score, n, missed) {
 }
 
 setTableMode();
+renderMiniMap();
 go('intro');
 document.getElementById('loading').remove();
 
@@ -1390,4 +1588,6 @@ document.getElementById('loading').remove();
 window.__lesson = { state, go, STEPS, QUIZ, FEATURES, F, PEAK, SADDLE, raiseWater, fillRest, selectFeature, toggleFlat, onSelect,
   hitLand, setLifeMode, setTableMode, get ui() { return ui; }, btnRects, panel, camera, renderer, terrain, LEVELS, MAX_LEVEL,
   input, rig, world, consoleBtns, consoleGroup, pressConsole, panelTex, pinObjs, rim, rimDistance, setTableYaw, get tableYaw() { return tableYaw; },
-  sampleHeight, THREE, get lifeSize() { return lifeSize; }, get waterLevel() { return waterLevel; } };
+  sampleHeight, THREE, get lifeSize() { return lifeSize; }, get waterLevel() { return waterLevel; },
+  __waterHandle: waterHandle, __squashHandle: squashHandle, __miniMap: miniMap };
+window.__lp = (h) => landPointHandler && landPointHandler(h);
