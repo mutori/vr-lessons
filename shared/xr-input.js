@@ -196,6 +196,7 @@ export function createXRInput(opts) {
     pickRay = () => null,           // (ray, pointer) => hit {point, distance, ...} | null
     onRaySelect = () => {},         // (pointer, hit)
     onRayHover = () => {},          // (pointer, hit|null) every frame
+    onRayRelease = null,            // (pointer, hit) when a ray press ends (optional)
     onHeldPress = null,             // (pointer, source, rayHit) when the pointer already holds something
     heldFocus = null,               // (pointer) => object to highlight while holding
     extraNear = null,               // (pointer) => true if the lesson has something touchable near
@@ -253,6 +254,7 @@ export function createXRInput(opts) {
       p.kind = null; p.inputSource = null; p.tracked = false;
       p.sysSelect = p.jointPinch = p.squeeze = false;
       if (p.dragging) endDrag(p);
+      if (p.raySelect) { const h = p.raySelect.hit; p.raySelect = null; if (onRayRelease) onRayRelease(p, h); }
       updateKind();
     });
     ray.addEventListener('selectstart', () => { p.sysSelect = true; p.sysQueued = true; });
@@ -345,10 +347,12 @@ export function createXRInput(opts) {
       for (const h of p.history) { if (h.t <= target) pick = h; else break; }
       if (pick && pick.hit) hit = pick.hit;
     }
-    if (hit) { haptic(p); onRaySelect(p, hit); }
+    if (hit) { haptic(p); p.raySelect = { hit, source }; onRaySelect(p, hit); }
   }
   function release(p, source) {
     if (p.dragging && p.dragging.dragSource === source) endDrag(p);
+    // a ray press that is held (for example a tap that flows while held) is told when it ends
+    if (p.raySelect && p.raySelect.source === source) { const h = p.raySelect.hit; p.raySelect = null; if (onRayRelease) onRayRelease(p, h); }
   }
   function endDrag(p) {
     const e = p.dragging; p.dragging = null;
