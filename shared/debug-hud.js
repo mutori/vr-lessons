@@ -26,6 +26,7 @@ export function createDebugHud({ renderer, camera, input }) {
   let calls = 0, tris = 0, drawAt = 0;
 
   function update() {
+    mesh.visible = renderer.xr.isPresenting;   // in the headset only; the page shows the same lines
     const now = performance.now();
     const ms = now - last; last = now;
     recent.push([now, ms]);

@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import * as T from './terrain.js';
+import { createXRInput, inputWords } from '../shared/xr-input.js';
+import { createDebugHud } from '../shared/debug-hud.js';
 
 const { HALF, H0, INTERVAL } = T;
 
@@ -58,11 +60,14 @@ const SKY_TABLE = new THREE.Color(0xbfd8e8);
 scene.background = SKY_TABLE.clone();
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.02, 6000);
-camera.position.set(0, 1.75, 0.95);
-scene.add(camera);
+camera.position.set(0, 1.75, 1.1);
+// The player rig: in VR it is placed so the learner's head starts in front of the table, facing it.
+const rig = new THREE.Group();
+scene.add(rig);
+rig.add(camera);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1.22, -1.15);
+controls.target.set(0, 1.12, -1.0);
 controls.enableDamping = true;
 controls.minDistance = 0.3;
 controls.maxDistance = 4;
@@ -74,6 +79,10 @@ sun.position.set(-2, 4, 1);
 scene.add(sun);
 
 // ---------- Classroom space: floor and table ----------
+// In VR the learner's head starts at the origin facing -z. The table's near edge is 0.2 m in front,
+// with a strip of touch buttons along it; the model's centre is 0.8 m away.
+const TABLE_Z = -0.8;          // model centre (m)
+const TABLE_TOP = 0.78;
 const room = new THREE.Group();
 scene.add(room);
 {
@@ -81,10 +90,10 @@ scene.add(room);
   floor.rotation.x = -Math.PI / 2;
   room.add(floor);
   const tableMat = new THREE.MeshLambertMaterial({ color: 0x5b3a21 });
-  const top = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.05, 1.45), tableMat);
-  top.position.set(0, 0.755, -0.95);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 1.2), tableMat);
+  top.position.set(0, 0.755, TABLE_Z);
   room.add(top);
-  for (const [x, z] of [[-0.65, -0.3], [0.65, -0.3], [-0.65, -1.6], [0.65, -1.6]]) {
+  for (const [x, z] of [[-0.54, TABLE_Z + 0.54], [0.54, TABLE_Z + 0.54], [-0.54, TABLE_Z - 0.54], [0.54, TABLE_Z - 0.54]]) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.73, 0.06), tableMat);
     leg.position.set(x, 0.365, z);
     room.add(leg);
@@ -92,7 +101,7 @@ scene.add(room);
 }
 
 // ---------- Terrain model ----------
-const TABLE_SIZE = 1.2;                       // model width on the table (m)
+const TABLE_SIZE = 1.0;                       // model width on the table (m): small enough to reach across
 const TABLE_SCALE = TABLE_SIZE / (2 * HALF);  // world metres per landscape metre
 const TABLE_EXAG = 2;                         // heights are stretched x2 on the table model
 const FLAT = 0.0015;
@@ -307,7 +316,12 @@ nameLabel(-600, 560, 'Tafura Plateau');
 nameLabel(800, -700, 'Nhete Ridge');
 nameLabel(700, 450, 'Chenga River');
 
-// North arrow and scale bar on the table
+// North arrow, scale bar and rim turn with the model (turntable)
+const turnGroup = new THREE.Group();
+turnGroup.position.set(0, TABLE_TOP, TABLE_Z);
+room.add(turnGroup);
+const rim = new THREE.Group();
+let tableYaw = 0;
 {
   const c = document.createElement('canvas'); c.width = 256; c.height = 256;
   const x = c.getContext('2d');
@@ -315,11 +329,11 @@ nameLabel(700, 450, 'Chenga River');
   x.fillStyle = '#222'; x.beginPath(); x.moveTo(128, 30); x.lineTo(168, 190); x.lineTo(128, 160); x.lineTo(88, 190); x.closePath(); x.fill();
   x.font = 'bold 64px system-ui'; x.textAlign = 'center'; x.fillText('N', 128, 250 - 14);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-  m.rotation.x = -Math.PI / 2; m.position.set(0.66, 0.782, -1.55 + 0.1);
-  room.add(m);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  m.rotation.x = -Math.PI / 2; m.position.set(TABLE_SIZE / 2 + 0.018, 0.032, -TABLE_SIZE / 2 - 0.018);
+  turnGroup.add(m);
 
-  // Scale bar: 500 m on the model is 0.3 m. On the canvas the bar is 420 px of 512 px.
+  // Scale bar: 500 m on the model. On the canvas the bar is 420 px of 512 px.
   const c2 = document.createElement('canvas'); c2.width = 512; c2.height = 128;
   const y = c2.getContext('2d');
   y.fillStyle = '#f6f1e3'; roundRect(y, 0, 0, 512, 128, 16); y.fill();
@@ -328,10 +342,20 @@ nameLabel(700, 450, 'Chenga River');
   y.fillText('0', 46, 108); y.fillText('250 m', 256, 108); y.fillText('500 m', 466, 108);
   y.font = 'bold 28px system-ui'; y.fillText('Contour interval 20 m', 256, 14 + 14);
   const t2 = new THREE.CanvasTexture(c2); t2.colorSpace = THREE.SRGBColorSpace;
-  const wBar = 0.3 * 512 / 420;
+  const wBar = 500 * TABLE_SCALE * 512 / 420;
   const bar = new THREE.Mesh(new THREE.PlaneGeometry(wBar, wBar / 4), new THREE.MeshBasicMaterial({ map: t2, transparent: true }));
-  bar.rotation.x = -Math.PI / 2; bar.position.set(0.3, 0.782, -0.29);
-  room.add(bar);
+  bar.rotation.x = -Math.PI / 2; bar.position.set(-0.2, 0.002, -TABLE_SIZE / 2 - 0.075);
+  turnGroup.add(bar);
+  // wooden rim round the model: pinch it (or grip it) and drag sideways to turn the model
+  const rimMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+  const h = TABLE_SIZE / 2 + 0.018;
+  for (const [x, z, w, d] of [[0, -h, 2 * h + 0.036, 0.036], [0, h, 2 * h + 0.036, 0.036], [-h, 0, 0.036, 2 * h], [h, 0, 0.036, 2 * h]]) {
+    const r = new THREE.Mesh(new THREE.BoxGeometry(w, 0.03, d), rimMat);
+    r.position.set(x, 0.015, z);
+    rim.add(r);
+  }
+  turnGroup.add(rim);
+  var rimMaterial = rimMat;
 }
 
 // ---------- Feature pins (Station 2) and quiz letters ----------
@@ -380,12 +404,53 @@ const panelTex = new THREE.CanvasTexture(panelCanvas); panelTex.colorSpace = THR
 panelTex.anisotropy = 4;
 const panel = new THREE.Mesh(new THREE.PlaneGeometry(PANEL_W, PANEL_H), new THREE.MeshBasicMaterial({ map: panelTex, transparent: true }));
 scene.add(panel);
-function placePanelAtTable() { panel.rotation.order = 'XYZ'; panel.position.set(0, 1.72, -1.78); panel.rotation.set(-0.12, 0, 0); }
+function placePanelAtTable() { panel.rotation.order = 'XYZ'; panel.position.set(0, 1.7, -1.62); panel.rotation.set(-0.12, 0, 0); }
 placePanelAtTable();
 
 let ui = { title: '', body: '', buttons: [], layout: 'row', tag: '' };
-let hoverBtn = null;
 const btnRects = [];
+
+// Hover on the board is shown by a small highlight over the button, one per pointer, so pointing
+// never redraws the board's canvas (redrawing re-uploads a 1400 x 915 texture).
+const hoverQuads = [];
+{
+  const c = document.createElement('canvas'); c.width = 256; c.height = 96;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(255,214,90,0.22)'; roundRect(x, 4, 4, 248, 88, 18); x.fill();
+  x.strokeStyle = '#ffd65a'; x.lineWidth = 8; roundRect(x, 4, 4, 248, 88, 18); x.stroke();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  for (let i = 0; i < 3; i++) {
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    q.visible = false; q.raycast = () => {}; q.renderOrder = 3;
+    panel.add(q); hoverQuads.push(q);
+  }
+}
+function showBoardHover(i, b) {
+  const q = hoverQuads[i];
+  const r = b && b.enabled !== false ? btnRects.find((r) => r.b === b) : null;
+  if (!r) { q.visible = false; return; }
+  q.visible = true;
+  q.position.set((r.x + r.w / 2) / CW * PANEL_W - PANEL_W / 2, PANEL_H / 2 - (r.y + r.h / 2) / CH * PANEL_H, 0.002);
+  q.scale.set(r.w / CW * PANEL_W + 0.01, r.h / CH * PANEL_H + 0.01, 1);
+}
+
+// Instructions name the input in use: {tokens} in board text are filled in when the board is drawn.
+function phrase(key) {
+  const k = input.kind;
+  const P = {
+    howto: { hand: 'touch a button on the near edge of the table with your fingertip, or point at the board and pinch.',
+      controller: 'touch a button on the near edge of the table with the controller tip, or point at the board and pull the trigger.',
+      mouse: 'click a button on the board.' },
+    touchPin: { hand: 'Touch a pin with your fingertip, or point at it and pinch,', controller: 'Touch a pin with the controller tip, or point at it and pull the trigger,', mouse: 'Click a pin' },
+    touchLand: { hand: 'Touch the spot with your fingertip, or point at it and pinch.', controller: 'Touch the spot with the controller tip, or point at it and pull the trigger.', mouse: 'Click on it.' },
+    turn: { hand: 'To bring far places closer, pinch the wooden edge of the model and drag it sideways.',
+      controller: 'To bring far places closer, squeeze the grip on the wooden edge of the model and drag it sideways.',
+      mouse: 'In VR you can turn the model by its wooden edge.' },
+  };
+  if (P[key]) return P[key][k === 'hand' || k === 'controller' ? k : 'mouse'];
+  return inputWords(k)[key] ?? key;
+}
+const fill = (t) => String(t).replace(/\{(\w+)\}/g, (_, k) => phrase(k));
 
 // Wrap text with **bold** spans. Returns lines of [{t, bold}] words.
 function wrapRich(ctx, text, maxW, size) {
@@ -417,7 +482,7 @@ function drawPanel() {
   c.textBaseline = 'top';
   if (ui.tag) { c.font = 'bold 30px system-ui'; c.fillStyle = '#c9a46a'; c.fillText(ui.tag.toUpperCase(), M, 34); }
   c.font = 'bold 54px system-ui'; c.fillStyle = '#fff6df';
-  c.fillText(ui.title, M, 74);
+  c.fillText(fill(ui.title), M, 74);
 
   // buttons layout
   btnRects.length = 0;
@@ -439,7 +504,7 @@ function drawPanel() {
   const maxH = btnTop - 160 - 20;
   let size = 40, lines;
   for (; size >= 24; size -= 2) {
-    lines = wrapRich(c, ui.body, CW - 2 * M, size);
+    lines = wrapRich(c, fill(ui.body), CW - 2 * M, size);
     if (lines.length * size * 1.32 <= maxH) break;
   }
   c.font = `${size}px system-ui`;
@@ -457,11 +522,7 @@ function drawPanel() {
   for (const r of btnRects) {
     const { b } = r;
     const on = b.enabled !== false;
-    const hov = hoverBtn === b && on;
-    let fill = b.style === 'good' ? '#2e7d3a' : b.style === 'bad' ? '#a3372b' : b.style === 'quiet' ? '#3a4a3e' : '#2f6b3a';
-    if (b.style === 'chosen') fill = '#8a6a1f';
-    if (!on) fill = '#3b403c';
-    c.fillStyle = hov ? '#d9a441' : fill;
+    c.fillStyle = btnColor(b);
     roundRect(c, r.x, r.y, r.w, r.h, 20); c.fill();
     c.fillStyle = on ? '#ffffff' : '#9aa39c';
     let fs = ui.layout === 'column' ? 34 : 38;
@@ -473,9 +534,90 @@ function drawPanel() {
     c.textAlign = 'left'; c.textBaseline = 'top';
   }
   panelTex.needsUpdate = true;
+  hoverQuads.forEach((q) => (q.visible = false));
+  syncConsole();
+}
+function btnColor(b) {
+  if (b.enabled === false) return '#3b403c';
+  if (b.style === 'chosen') return '#8a6a1f';
+  return b.style === 'good' ? '#2e7d3a' : b.style === 'bad' ? '#a3372b' : b.style === 'quiet' ? '#3a4a3e' : '#2f6b3a';
 }
 
-function setUI(next) { ui = { layout: 'row', tag: '', ...next }; hoverBtn = null; drawPanel(); }
+function setUI(next) { ui = { layout: 'row', tag: '', ...next }; ui.buttons = ui.buttons.filter(Boolean); drawPanel(); }
+
+// ---------- Touch console: the board's buttons, mirrored within reach ----------
+// On the table it is a strip along the near edge; at real size it sits 0.45 m in front of the learner.
+const consoleGroup = new THREE.Group();
+scene.add(consoleGroup);
+const CONSOLE_W = 0.84, CBTN_H = 0.065, CGAP = 0.016;
+const consoleBtns = [];
+for (let i = 0; i < 5; i++) {
+  const g = new THREE.Group();
+  const face = new THREE.Group();
+  const cv = document.createElement('canvas'); cv.width = 420; cv.height = 168;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.012), new THREE.MeshLambertMaterial({ color: 0x1d2a1f }));
+  back.position.z = -0.007;
+  const front = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  face.add(back, front);
+  g.add(face);
+  g.userData.face = face;
+  g.visible = false;
+  consoleGroup.add(g);
+  const rec = { g, face, back, front, cv, tex, b: null, key: '', w: 0.15 };
+  consoleBtns.push(rec);
+}
+function drawConsoleBtn(rec) {
+  const { cv, b } = rec;
+  const x = cv.getContext('2d');
+  x.clearRect(0, 0, cv.width, cv.height);
+  x.fillStyle = btnColor(b); roundRect(x, 4, 4, cv.width - 8, cv.height - 8, 26); x.fill();
+  x.strokeStyle = 'rgba(255,255,255,0.35)'; x.lineWidth = 4; roundRect(x, 4, 4, cv.width - 8, cv.height - 8, 26); x.stroke();
+  x.fillStyle = b.enabled === false ? '#9aa39c' : '#ffffff';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  const label = b.consoleLabel || b.label;
+  let fs = 50;
+  const words = label.split(' ');
+  let lines;
+  for (; fs >= 26; fs -= 2) {
+    x.font = `bold ${fs}px system-ui`;
+    lines = [];
+    let line = '';
+    for (const w of words) { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > cv.width - 36 && line) { lines.push(line); line = w; } else line = t; }
+    lines.push(line);
+    if (lines.length <= 2 && lines.every((l) => x.measureText(l).width <= cv.width - 30)) break;
+  }
+  lines.forEach((l, i) => x.fillText(l, cv.width / 2, cv.height / 2 + (i - (lines.length - 1) / 2) * fs * 1.1 + 2));
+  rec.tex.needsUpdate = true;
+}
+function syncConsole() {
+  const bs = ui.buttons;
+  const n = Math.min(bs.length, consoleBtns.length);
+  const w = Math.min(0.2, (CONSOLE_W - CGAP * (n - 1)) / Math.max(n, 1));
+  consoleBtns.forEach((rec, i) => {
+    const b = bs[i];
+    rec.g.visible = i < n;
+    if (!b) { rec.b = null; return; }
+    if (ui.layout === 'column') b.consoleLabel = String.fromCharCode(65 + i);   // long answers: the board shows the full text
+    else b.consoleLabel = null;
+    rec.b = b;
+    rec.g.position.set(-((n - 1) * (w + CGAP)) / 2 + i * (w + CGAP), 0, 0);
+    rec.face.scale.set(w, CBTN_H, 1);
+    rec.g.userData.size = { w, h: CBTN_H };
+    if (pokes[i]) { pokes[i].entry.w = w; pokes[i].entry.h = CBTN_H; }
+    const key = [b.consoleLabel || b.label, b.style, b.enabled, w].join('|');
+    if (key !== rec.key) { rec.key = key; drawConsoleBtn(rec); }
+  });
+}
+function pressConsole(i) {
+  const b = consoleBtns[i].b;
+  if (b && b.enabled !== false && b.onClick) { beep(660, 0.06); b.onClick(); }
+}
+function placeConsoleAtTable() {
+  consoleGroup.position.set(0, TABLE_TOP + 0.045, TABLE_Z + TABLE_SIZE / 2 + 0.058);
+  consoleGroup.rotation.set(-Math.PI / 2 + 0.75, 0, 0, 'YXZ');
+}
+placeConsoleAtTable();
 
 function buttonAtUV(uv) {
   if (!uv) return null;
@@ -485,9 +627,14 @@ function buttonAtUV(uv) {
 }
 interactables.push({
   obj: panel, enabled: () => panel.visible,
-  onHover: (hit) => { const b = hit ? buttonAtUV(hit.uv) : null; if (b !== hoverBtn) { hoverBtn = b; drawPanel(); } },
+  onHover: (hit, i = 2) => showBoardHover(i, hit ? buttonAtUV(hit.uv) : null),
   onSelect: (hit) => { const b = buttonAtUV(hit.uv); if (b && b.enabled !== false && b.onClick) { beep(660, 0.06); b.onClick(); } },
 });
+// console buttons can also be pointed at (and clicked on a computer)
+consoleBtns.forEach((rec, i) => interactables.push({
+  obj: rec.front, enabled: () => rec.g.visible && consoleGroup.visible,
+  onHover: () => {}, onSelect: () => pressConsole(i),
+}));
 
 // ---------- Sound and speech ----------
 let audioCtx = null;
@@ -513,11 +660,16 @@ function speak(text) {
     return true;
   } catch (e) { return false; }
 }
-const readBtn = () => ({ label: '🔊 Read to me', style: 'quiet', onClick: () => speak(ui.title + '. ' + ui.body) });
+// Quest Browser may have no speech voices; then the button is left out rather than doing nothing.
+let voicesReady = false;
+function checkVoices() { try { voicesReady = 'speechSynthesis' in window && speechSynthesis.getVoices().length > 0; } catch (e) { voicesReady = false; } return voicesReady; }
+checkVoices();
+try { speechSynthesis.addEventListener('voiceschanged', () => { const had = voicesReady; if (checkVoices() !== had && STEPS[state.step] && !['flatten', 'quiz', 'flood'].includes(state.step)) go(state.step); }); } catch (e) { /* no speech */ }
+const readBtn = () => (voicesReady ? { label: '🔊 Read to me', style: 'quiet', onClick: () => speak(fill(ui.title) + '. ' + fill(ui.body)) } : null);
 
 // ---------- Animations ----------
 const tweens = [];
-function tween(dur, fn, done) { tweens.push({ t0: performance.now(), dur, fn, done }); }
+function tween(dur, fn, done) { const tw = { t0: performance.now(), dur, fn, done }; tweens.push(tw); return tw; }
 function runTweens(now) {
   for (let i = tweens.length - 1; i >= 0; i--) {
     const tw = tweens[i];
@@ -532,10 +684,12 @@ function runTweens(now) {
 let exag = TABLE_EXAG;
 function setExag(v) { exag = v; terrain.scale.y = v; terrainUniforms.uMapMix.value = THREE.MathUtils.clamp(1 - (v - FLAT) / (TABLE_EXAG * 0.35), 0, 1); }
 let isFlat = false;
+let flatTween = null;
 function flatten(toFlat, dur = 2600, done) {
+  if (flatTween) { const i = tweens.indexOf(flatTween); if (i >= 0) tweens.splice(i, 1); }   // never two at once
   const from = exag, to = toFlat ? FLAT : TABLE_EXAG;
   isFlat = toFlat;
-  tween(dur, e => setExag(from + (to - from) * e), done);
+  flatTween = tween(dur, e => setExag(from + (to - from) * e), () => { flatTween = null; done && done(); });
 }
 
 // Fade to black (for jumping to life size)
@@ -551,8 +705,8 @@ let lifeSize = false;
 function setTableMode() {
   lifeSize = false;
   world.scale.setScalar(TABLE_SCALE);
-  world.rotation.set(0, 0, 0);
-  world.position.set(0, 0.8, -0.95);
+  world.rotation.set(0, tableYaw, 0);
+  world.position.set(0, TABLE_TOP + 0.02, TABLE_Z);
   setExag(isFlat ? FLAT : TABLE_EXAG);
   room.visible = true; outerGround.visible = false;
   scene.background.copy(SKY_TABLE);
@@ -560,14 +714,20 @@ function setTableMode() {
   terrainUniforms.uBand.value = 0;
   skirtMesh.visible = true;
   placePanelAtTable();
-  if (!renderer.xr.isPresenting) { camera.position.set(0, 1.75, 0.95); controls.target.set(0, 1.22, -1.15); controls.update(); }
+  placeConsoleAtTable();
+  aimRings.forEach((m) => (m.visible = false));
+  if (!renderer.xr.isPresenting) { camera.position.set(0, 1.75, 1.1); controls.target.set(0, 1.12, -1.0); controls.update(); }
 }
+// Head pose in the scene. In VR it is taken from this frame's viewer pose and the rig (always fresh,
+// even straight after the rig has moved).
 function headPosition() {
   const p = new THREE.Vector3();
+  if (renderer.xr.isPresenting && input.head.valid) { const h = input.head; rig.updateMatrixWorld(true); return rig.localToWorld(p.set(h.x, h.y, h.z)); }
   if (renderer.xr.isPresenting) renderer.xr.getCamera().getWorldPosition(p); else camera.getWorldPosition(p);
   return p;
 }
 function headYaw() {
+  if (renderer.xr.isPresenting && input.head.valid) return rig.rotation.y + input.head.yaw;
   const q = new THREE.Quaternion();
   (renderer.xr.isPresenting ? renderer.xr.getCamera() : camera).getWorldQuaternion(q);
   const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
@@ -591,7 +751,8 @@ function setLifeMode(vpName = 'south') {
   const yaw = renderer.xr.isPresenting ? headYaw() : 0;
   world.rotation.set(0, yaw, 0);
   const local = new THREE.Vector3(vp.x, T.height(vp.x, vp.z) - H0, vp.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-  world.position.set(head.x - local.x, -local.y, head.z - local.z);
+  const floorY = rig.position.y;   // raised for a seated learner
+  world.position.set(head.x - local.x, floorY - local.y, head.z - local.z);
   scene.background.set(0xcfe3f0);
   terrainUniforms.uFogColor.value.set(0xcfe3f0);
   terrainUniforms.uFogNear.value = 400; terrainUniforms.uFogFar.value = 2400;
@@ -600,31 +761,54 @@ function setLifeMode(vpName = 'south') {
   // board sits low in front, tilted up like a lectern, so the view of the land stays clear
   const dir = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
   panel.rotation.order = 'YXZ';
-  panel.position.set(head.x + dir.x * 1.0, 0.95, head.z + dir.z * 1.0);
+  panel.position.set(head.x + dir.x * 1.0, floorY + 0.95, head.z + dir.z * 1.0);
   panel.rotation.set(-0.65, yaw, 0);
+  // touch buttons 0.45 m in front, at waist height, below the line of sight to the board
+  consoleGroup.position.set(head.x + dir.x * 0.42, head.y - 0.5, head.z + dir.z * 0.42);
+  consoleGroup.rotation.set(-0.85, yaw, 0, 'YXZ');
   if (!renderer.xr.isPresenting) {   // desktop: board further away so it fits on screen
     panel.position.set(0, 0.92, -1.9); panel.rotation.set(-0.3, 0, 0);
+    consoleGroup.position.set(0, 0.62, -0.9); consoleGroup.rotation.set(-0.6, 0, 0, 'YXZ');
     camera.position.set(0, 1.6, 0.01); controls.target.set(0, 1.4, -1); controls.update();
   }
 }
 
 // ---------- Pointing at the land ----------
+// Heights cached on the model's own grid (from the terrain mesh), sampled bilinearly. Cheap enough
+// to test a ray against the land every frame for the live aim ring and fingertip touch.
+const GRID_N = RES + 1;
+const heightGrid = new Float32Array(GRID_N * GRID_N);
+{
+  const pos = terrainGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) heightGrid[i] = pos.getY(i);
+}
+function sampleHeight(x, z) {   // local height (m above H0) at landscape x, z
+  const fx = THREE.MathUtils.clamp((x + HALF) / (2 * HALF) * RES, 0, RES - 1e-6);
+  const fz = THREE.MathUtils.clamp((z + HALF) / (2 * HALF) * RES, 0, RES - 1e-6);
+  const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz;
+  const i = iz * GRID_N + ix;
+  const a = heightGrid[i], b = heightGrid[i + 1], c = heightGrid[i + GRID_N], d = heightGrid[i + GRID_N + 1];
+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+}
+
 const _inv = new THREE.Matrix4();
-function hitLand(ray) {
+const _ho = new THREE.Vector3(), _hd = new THREE.Vector3(), _hp = new THREE.Vector3();
+// Where a ray meets the land. exact=false uses only the cached grid (for per-frame hover).
+function hitLand(ray, exact = true) {
   terrain.updateMatrixWorld(true);
   _inv.copy(terrain.matrixWorld).invert();
-  const o = ray.origin.clone().applyMatrix4(_inv);
+  const o = _ho.copy(ray.origin).applyMatrix4(_inv);
   // transform direction without normalising (affine): p(t) = o + D t
-  const p1 = ray.origin.clone().add(ray.direction).applyMatrix4(_inv);
-  const D = p1.sub(o);
-  const yAt = (p) => T.height(p.x, p.z) - H0;
+  const D = _hd.copy(ray.origin).add(ray.direction).applyMatrix4(_inv).sub(o);
+  const grid = (p) => sampleHeight(p.x, p.z);
+  const real = (p) => T.height(p.x, p.z) - H0;
   const maxT = lifeSize ? 4000 : 6;
-  let t = 0, step = lifeSize ? 1 : 0.003;
-  let prevT = 0;
-  const p = new THREE.Vector3();
+  let t = 0, prevT = 0;
+  const p = _hp;
   while (t < maxT) {
     p.copy(D).multiplyScalar(t).add(o);
-    if (Math.abs(p.x) <= HALF && Math.abs(p.z) <= HALF && p.y <= yAt(p)) {
+    if (Math.abs(p.x) <= HALF && Math.abs(p.z) <= HALF && p.y <= grid(p)) {
+      const yAt = exact ? real : grid;
       let a = prevT, b = t;
       for (let i = 0; i < 18; i++) {
         const m = (a + b) / 2; p.copy(D).multiplyScalar(m).add(o);
@@ -634,7 +818,7 @@ function hitLand(ray) {
       return { x: p.x, z: p.z, world: new THREE.Vector3(p.x, yAt(p), p.z).applyMatrix4(terrain.matrixWorld) };
     }
     prevT = t;
-    t += lifeSize ? Math.max(1, t * 0.006) : step;
+    t += lifeSize ? Math.max(1, t * 0.006) : 0.003;
   }
   return null;
 }
@@ -676,7 +860,7 @@ const STEPS = {
         '2. Tell a steep slope from a gentle slope on a map.\n' +
         '3. Recognise a hill, plateau, spur, valley, ridge and saddle from contours.\n' +
         '4. Use contours to work out which way a river flows.\n\n' +
-        'How to use: point at a button and pull the trigger (or pinch your fingers). Stay standing or sitting where you are. About 15 minutes.',
+        'How to use: {howto} Stay standing or sitting where you are. About 15 minutes.',
       buttons: [readBtn(), { label: 'Start ▶', onClick: () => go('words') }],
     });
   },
@@ -687,7 +871,7 @@ const STEPS = {
         '**Contour line**: a line on a map joining places that are at the SAME height above sea level.\n' +
         '**Contour interval**: the difference in height between two lines next to each other. On our map it is 20 m.\n' +
         '**Spot height**: a dot with a number that shows the exact height of one place.\n\n' +
-        'Look down at the table: it holds a model of Dombo Hill and the land around it. North is at the far side of the table. You can lean in close to look.',
+        'Look down at the table: it holds a model of Dombo Hill and the land around it. The arrow marked N on the table shows north, which starts at the far side. You can lean in close to look.\n\n{turn}',
       buttons: [readBtn(), { label: '◀ Back', style: 'quiet', onClick: () => go('intro') }, { label: 'Next ▶', onClick: () => go('flood') }],
     });
   },
@@ -721,7 +905,8 @@ const STEPS = {
           'Press "Raise the land" and "Flatten" a few times. Watch each line stay in the same place.',
         buttons: [readBtn(), { label: '⇅ Raise the land', onClick: toggleFlat }, { label: 'Next ▶', onClick: () => go('features') }],
       });
-      ui.buttons[1].label = isFlat ? '⇅ Raise the land' : '⇅ Flatten to a map'; drawPanel();
+      const tb = ui.buttons.find((b) => b.label.startsWith('⇅'));
+      if (tb) { tb.label = isFlat ? '⇅ Raise the land' : '⇅ Flatten to a map'; drawPanel(); }
     });
     setUI({ tag: 'Station 1 · Observe', title: 'Watch the land flatten…', body: 'The hill is being squashed down into a map. Keep your eyes on the lines.', buttons: [] });
   },
@@ -742,7 +927,7 @@ const STEPS = {
   onHill() {
     const base = {
       tag: 'Station 3 · South of Dombo Hill', title: 'Which side is steeper?',
-      body: 'Look up at Dombo Hill. West is on your left, east is on your right.\n\n**Point at the STEEPER side of the hill and pull the trigger.** Look at how close the brown lines are on each side.',
+      body: 'Look up at Dombo Hill. West is on your left, east is on your right.\n\n**Point at the STEEPER side of the hill and {select}.** Look at how close the brown lines are on each side.',
     };
     const btns = (done) => [readBtn(),
       { label: 'Climb to the summit ▲', style: done ? undefined : 'quiet', onClick: () => fadeThrough(() => { setLifeMode('summit'); go('summit'); }) },
@@ -797,6 +982,7 @@ const STEPS = {
         'Close lines = steep. Far apart = gentle. Closed rings = hill. V pointing uphill = valley. V pointing downhill = spur. Rivers flow from high contours to low ones.',
       buttons: [readBtn(), { label: '↺ Try the test again', onClick: () => go('quizIntro') }, { label: '⌂ Start lesson again', style: 'quiet', onClick: () => { terrainUniforms.uGrid.value = 0; go('intro'); } }],
     });
+    showPageResult(s, n, state.answers.filter(a => !a.ok).map(a => a.topic));
   },
 };
 
@@ -830,7 +1016,7 @@ function renderFlood() {
 }
 let raising = false;
 function raiseWater() {
-  if (raising) return;
+  if (raising || filling) return;
   raising = true;
   const from = waterLevel, to = Math.min(MAX_LEVEL, (waterLevel < MIN_LEVEL ? MIN_LEVEL : waterLevel + INTERVAL));
   tween(900, e => { water.position.y = (from + (to - from) * e) - H0 + 0.2; }, () => {
@@ -843,13 +1029,16 @@ function raiseWater() {
     if (waterLevel >= MAX_LEVEL) drainThen(); else renderFlood();
   });
 }
+let filling = false;
 function fillRest() {
+  if (filling || raising) return;
+  filling = true;
   const from = waterLevel;
   tween(2200, e => {
     const lvl = from + (MAX_LEVEL - from) * e;
     water.position.y = lvl - H0 + 0.2;
     terrainUniforms.uReveal.value = Math.floor(lvl / INTERVAL) * INTERVAL;
-  }, () => { waterLevel = MAX_LEVEL; terrainUniforms.uReveal.value = MAX_LEVEL; drainThen(); });
+  }, () => { filling = false; waterLevel = MAX_LEVEL; terrainUniforms.uReveal.value = MAX_LEVEL; drainThen(); });
 }
 function drainThen() {
   const from = water.position.y;
@@ -873,7 +1062,7 @@ function renderFeatures(f) {
     title: f ? `${f.n}. ${f.name}` : 'Find the landforms',
     body: f
       ? `**On a map:** ${f.map}\n\n**On the land:** ${f.land}\n\nFlatten the model to see this pattern as a map, then raise it again. Then pick another pin.`
-      : 'Eight red pins stand on the model. Point at a pin and pull the trigger to learn about the landform there. The land under it will glow.\n\nUse "Flatten to a map" to compare the real shape with its contour pattern.',
+      : 'Eight red pins stand on the model. {touchPin} to learn about the landform there. The land under it will glow.\n\nUse "Flatten to a map" to compare the real shape with its contour pattern.',
     buttons: [readBtn(), { label: isFlat ? '⇅ Raise the land' : '⇅ Flatten to a map', onClick: toggleFlat },
       { label: n >= FEATURES.length ? 'Next ▶' : `Next (${n}/${FEATURES.length}) ▶`, style: n >= FEATURES.length ? undefined : 'quiet', onClick: () => { highlight(null); go('stand'); } }],
   });
@@ -890,7 +1079,7 @@ const QUIZ = [
     options: ['10 m', '20 m', '25 m', '50 m'], answer: 1,
     why: 'There are 4 thin lines between 1100 and 1200, which makes 5 equal gaps. 100 m ÷ 5 = 20 m. Every 5th line (each 100 m) is drawn thicker.' },
   { topic: 'Saddle', point: 'saddle',
-    q: 'POINT at the map: find the SADDLE, the low dip between Dombo Hill and the smaller hill to its north-west. Pull the trigger on it.',
+    q: 'POINT at the map: find the SADDLE, the low dip between Dombo Hill and the smaller hill to its north-west. {touchLand}',
     why: 'The saddle is where the two sets of rings face each other, like an hourglass. It is lower than both hilltops.' },
   { topic: 'Valleys and spurs', letters: ['E'],
     q: 'At letter E the contour lines bend into a V that points UPHILL (towards higher ground). What landform is at E?',
@@ -901,7 +1090,7 @@ const QUIZ = [
     options: ['From north to south', 'From south to north', 'From east to west', 'It does not flow'], answer: 0,
     why: `Rivers flow downhill, from high to low. The river starts near ${Math.round(T.height(420, -930))} m in the north and leaves the map at about ${Math.round(T.height(870, 930))} m in the south. Also, the contour Vs along it point north, upstream.`, show: 'valley' },
   { topic: 'Hills and spot heights', point: 'hill',
-    q: 'POINT at the map: find the HIGHEST point of the land shown. Pull the trigger on it.',
+    q: 'POINT at the map: find the HIGHEST point of the land shown. {touchLand}',
     why: `The highest point is the top of Dombo Hill, inside the smallest closed ring. It is marked with a trig station: ▲ ${Math.round(PEAK.h)} m.` },
   { topic: 'Explaining contour spacing',
     q: 'A friend asks: "Why are contour lines close together on a steep slope?" Choose the best explanation.',
@@ -952,32 +1141,8 @@ function answerQuestion(ok, Q, extra, chosen) {
   });
 }
 
-// ---------- Input: XR controllers / hands, and the mouse ----------
+// ---------- Input: hands and controllers (shared/xr-input.js), and the mouse ----------
 const raycaster = new THREE.Raycaster();
-const tmpMat = new THREE.Matrix4();
-const ctrls = [];
-for (let i = 0; i < 2; i++) {
-  const c = renderer.xr.getController(i);
-  const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
-  const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.85 }));
-  line.scale.z = 3;
-  c.add(line);
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.008, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffe08a, depthTest: false }));
-  dot.renderOrder = 9; dot.visible = false;
-  scene.add(dot);
-  const rec = { c, line, dot, hover: null };
-  c.addEventListener('select', () => onSelect(rayFromController(c)));
-  c.addEventListener('connected', (e) => { line.visible = e.data.targetRayMode !== 'gaze'; });
-  scene.add(c);
-  ctrls.push(rec);
-}
-function rayFromController(c) {
-  tmpMat.identity().extractRotation(c.matrixWorld);
-  const r = new THREE.Ray();
-  r.origin.setFromMatrixPosition(c.matrixWorld);
-  r.direction.set(0, 0, -1).applyMatrix4(tmpMat).normalize();
-  return r;
-}
 function pickUI(ray) {
   raycaster.ray.copy(ray);
   const objs = interactables.filter(i => i.enabled()).map(i => i.obj);
@@ -994,15 +1159,124 @@ function onSelect(ray) {
     if (h) landPointHandler(h);
   }
 }
-let lastHoverItem = null;
-function updateHover(ray, rec) {
+// What a pointer's ray is on: a board/console button or pin ('ui'), or the land during a pointing task.
+function pickRay(ray) {
   const p = pickUI(ray);
-  const item = p ? p.item : null;
-  if (rec) {
-    if (p) { rec.line.scale.z = p.hit.distance; rec.dot.visible = true; rec.dot.position.copy(p.hit.point); }
-    else { rec.line.scale.z = lifeSize ? 30 : 3; rec.dot.visible = false; }
+  if (p) return { kind: 'ui', item: p.item, hit: p.hit, point: p.hit.point, distance: p.hit.distance };
+  if (landPointHandler) {
+    const h = hitLand(ray, false);
+    if (h) return { kind: 'land', land: h, point: h.world, distance: h.world.distanceTo(ray.origin) };
   }
-  return p;
+  return null;
+}
+
+// Live aim rings: show where a ray meets the land before the learner commits (one per pointer).
+const aimRings = [0, 1].map(() => {
+  const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.12, 6, 32).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffe08a, depthTest: false, transparent: true, opacity: 0.9 }));
+  m.renderOrder = 6; m.visible = false; m.raycast = () => {};
+  scene.add(m);
+  return m;
+});
+function placeRing(m, world) {
+  m.visible = true;
+  m.position.copy(world);
+  const s = lifeSize ? Math.max(1.5, world.distanceTo(headPosition()) * 0.02) : 0.016;
+  m.scale.setScalar(s);
+  m.position.y += lifeSize ? 0.3 : 0.004;
+}
+
+const hoverItems = [null, null, null];
+function setHover(i, item, hit) {
+  if (hoverItems[i] && hoverItems[i] !== item) hoverItems[i].onHover(null, i);
+  if (item) item.onHover(hit, i);
+  hoverItems[i] = item;
+}
+
+// Turntable: pinch the model's wooden rim (or grip it) and drag sideways to turn the model.
+const turn = { active: null, startAngle: 0, startYaw: 0 };
+const modelAngle = (p) => Math.atan2(-(p.z - TABLE_Z), p.x);
+function rimDistance(pt) {
+  if (lifeSize || !room.visible) return Infinity;
+  const dx = pt.x, dz = pt.z - TABLE_Z;
+  const c = Math.cos(tableYaw), sn = Math.sin(tableYaw);
+  const lx = c * dx - sn * dz, lz = sn * dx + c * dz;
+  const h = TABLE_SIZE / 2 + 0.018;
+  const ax = Math.abs(lx), az = Math.abs(lz);
+  const outside = Math.hypot(Math.max(ax - h, 0), Math.max(az - h, 0));
+  const edge = ax <= h && az <= h ? h - Math.max(ax, az) : outside;
+  const dy = pt.y - (TABLE_TOP + 0.03);
+  return Math.hypot(edge, Math.max(0, Math.abs(dy) - 0.06));
+}
+function setTableYaw(y) {
+  tableYaw = y;
+  turnGroup.rotation.y = y;
+  if (!lifeSize) world.rotation.y = y;
+}
+
+const input = createXRInput({
+  renderer, scene, camera, parent: rig,
+  pickRay,
+  onRaySelect: (p, hit) => {
+    if (hit.kind === 'ui') hit.item.onSelect(hit.hit);
+    else if (hit.kind === 'land' && landPointHandler) { const h = hitLand(p.worldRay); if (h) landPointHandler(h); }
+  },
+  onRayHover: (p, hit) => {
+    setHover(p.index, hit && hit.kind === 'ui' ? hit.item : null, hit && hit.hit);
+    if (hit && hit.kind === 'land') placeRing(aimRings[p.index], hit.point); else aimRings[p.index].visible = false;
+  },
+  extraNear: (p) => nearLand(p),
+  rayLength: () => (lifeSize ? 30 : 3),
+  sound: () => {},
+  onKindChange: () => drawPanel(),
+});
+const hud = createDebugHud({ renderer, camera, input });
+// console buttons are poked
+const pokes = consoleBtns.map((rec, i) => input.addPokable(rec.g, { onPress: () => pressConsole(i), enabled: () => rec.g.visible && consoleGroup.visible }));
+// pins are touched
+pinObjs.forEach((rec) => input.addTouchable(rec.head, { radius: 0.02, onTouch: () => selectFeature(rec.f.id), enabled: () => pins.visible && !lifeSize }));
+// the rim is pinched and dragged
+input.addNearTarget(rim, {
+  distance: rimDistance, highlight: false,
+  onPinch: (p) => { turn.active = p; turn.startAngle = modelAngle(p.pinchPoint); turn.startYaw = tableYaw; beep(520, 0.05); },
+  onDrag: (p) => {
+    let d = modelAngle(p.pinchPoint) - turn.startAngle;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    setTableYaw(turn.startYaw + d);
+  },
+  onRelease: () => { turn.active = null; },
+});
+
+// Touching the land with a fingertip answers a "point at the map" task (table model only).
+const landTouch = [{ armed: true }, { armed: true }];
+const _tl = new THREE.Vector3();
+function landGapAt(tip) {   // fingertip height above the model surface (world metres), or null if off the model
+  _tl.copy(tip).applyMatrix4(_inv.copy(terrain.matrixWorld).invert());
+  if (Math.abs(_tl.x) > HALF || Math.abs(_tl.z) > HALF) return null;
+  return (_tl.y - sampleHeight(_tl.x, _tl.z)) * world.scale.y * terrain.scale.y;
+}
+function nearLand(p) {
+  if (lifeSize || !(landPointHandler || pins.visible)) return false;
+  const g = landGapAt(p.tip);
+  return g !== null && g < input.TUNING.nearRadius;
+}
+function updateLandTouch() {
+  for (const p of input.pointers) {
+    const st = landTouch[p.index];
+    if (!p.tipOk || lifeSize || !landPointHandler) { st.armed = true; continue; }
+    const g = landGapAt(p.tip);
+    if (g === null) { st.armed = true; continue; }
+    if (st.armed && g < p.tipRadius + 0.004) {
+      st.armed = false;
+      _tl.set(_tl.x, sampleHeight(_tl.x, _tl.z), _tl.z);
+      const world3 = _tl.clone().applyMatrix4(terrain.matrixWorld);
+      input.haptic(p, 0.6, 30);
+      landPointHandler({ x: _tl.x, z: _tl.z, world: world3 });
+    } else if (g > 0.03) st.armed = true;
+  }
+}
+function updateRimGlow() {
+  const near = !lifeSize && input.pointers.some((p) => p.tipOk && (turn.active === p || rimDistance(p.pinchPoint) < input.TUNING.grabRadius));
+  rimMaterial.color.setHex(turn.active ? 0xe0a040 : near ? 0xc78a3e : 0x8a5a2b);
 }
 
 // Mouse (desktop)
@@ -1023,7 +1297,7 @@ renderer.domElement.addEventListener('pointermove', e => {
 const _nm = new THREE.Matrix3();
 function placeLabels() {
   for (const L of labels) {
-    const hLocal = T.height(L.x, L.z) - H0;
+    const hLocal = L.hLocal;
     if (L.kind === 'pin') {
       L.obj.position.set(L.x, hLocal * terrain.scale.y, L.z);
       L.obj.scale.setScalar(1 / world.scale.x);
@@ -1035,30 +1309,25 @@ function placeLabels() {
     L.obj.scale.copy(L._s0).multiplyScalar(1 / world.scale.x);
   }
 }
+for (const L of labels) L.hLocal = T.height(L.x, L.z) - H0;
 
-let hoverItems = [null, null, null];
 renderer.setAnimationLoop((now) => {
   runTweens(now);
   terrainUniforms.uTime.value = now / 1000;
   world.updateMatrixWorld(true);
   terrainUniforms.uNormalWorld.value.getNormalMatrix(terrain.matrixWorld);
   placeLabels();
-
-  // hover feedback
-  const rays = [];
-  if (renderer.xr.isPresenting) ctrls.forEach((rec, i) => { rays.push([rayFromController(rec.c), rec, i]); });
-  else { raycaster.setFromCamera(mouse, camera); rays.push([raycaster.ray.clone(), null, 2]); }
-  let any = null;
-  for (const [ray, rec, i] of rays) {
-    const p = updateHover(ray, rec);
-    if (p) any = p;
-    const item = p ? p.item : null;
-    if (hoverItems[i] && hoverItems[i] !== item) hoverItems[i].onHover(null);
-    if (item) item.onHover(p.hit);
-    hoverItems[i] = item;
+  input.update();
+  if (renderer.xr.isPresenting) { updateLandTouch(); updateRimGlow(); }
+  else {
+    raycaster.setFromCamera(mouse, camera);
+    const p = pickUI(raycaster.ray);
+    setHover(2, p ? p.item : null, p && p.hit);
+    controls.update();
+    renderer.domElement.style.cursor = p ? 'pointer' : (landPointHandler ? 'crosshair' : 'grab');
   }
-  if (!renderer.xr.isPresenting) { controls.update(); renderer.domElement.style.cursor = any ? 'pointer' : (landPointHandler ? 'crosshair' : 'grab'); }
   renderer.render(scene, camera);
+  hud.update();
 });
 
 window.addEventListener('resize', () => {
@@ -1084,7 +1353,11 @@ async function setupVR() {
     if (session) { session.end(); return; }
     try {
       session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
-      session.addEventListener('end', () => { session = null; enterBtn.textContent = 'Enter VR'; if (lifeSize) { setTableMode(); go('quizIntro'); } });
+      session.addEventListener('end', () => {
+        session = null; enterBtn.textContent = 'Enter VR';
+        rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);
+        if (lifeSize) { setTableMode(); go('quizIntro'); } else setTableMode();
+      });
       await renderer.xr.setSession(session);
       enterBtn.textContent = 'Exit VR';
     } catch (e) {
@@ -1094,10 +1367,27 @@ async function setupVR() {
 }
 setupVR();
 
+// Start in front of the learner (and again when they recentre the headset): head 0.2 m behind the
+// table's near edge, facing the model. At real size the land is placed again around the head.
+input.onRecenter((head) => {
+  input.setLiftFromHead(head);
+  input.placeRig(rig, 0, 0, 0);
+  if (lifeSize && viewpoint) { rig.updateMatrixWorld(true); camera.updateMatrixWorld(true); setLifeMode(viewpoint); }
+});
+
+// The test result stays on the web page after leaving VR, so a teacher can note it.
+function showPageResult(score, n, missed) {
+  const el = document.getElementById('result'); if (!el) return;
+  el.hidden = false;
+  el.innerHTML = `<b>Map test: ${score} out of ${n}</b>` + (missed.length ? '<br>Look again at: ' + missed.join(', ') : '<br>Full marks.');
+}
+
 setTableMode();
 go('intro');
 document.getElementById('loading').remove();
 
 // Exposed for automated tests only
 window.__lesson = { state, go, STEPS, QUIZ, FEATURES, F, PEAK, SADDLE, raiseWater, fillRest, selectFeature, toggleFlat, onSelect,
-  hitLand, setLifeMode, setTableMode, get ui() { return ui; }, btnRects, panel, camera, renderer, terrain, LEVELS, MAX_LEVEL };
+  hitLand, setLifeMode, setTableMode, get ui() { return ui; }, btnRects, panel, camera, renderer, terrain, LEVELS, MAX_LEVEL,
+  input, rig, world, consoleBtns, consoleGroup, pressConsole, panelTex, pinObjs, rim, rimDistance, setTableYaw, get tableYaw() { return tableYaw; },
+  sampleHeight, THREE, get lifeSize() { return lifeSize; }, get waterLevel() { return waterLevel; } };
