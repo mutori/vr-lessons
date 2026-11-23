@@ -28,6 +28,24 @@ Each mission gives live readouts, sound, haptics and colour feedback, a bouncing
 try next, and exam-style questions where a wrong answer explains the mistake and allows another try.
 Stars are saved in the browser.
 
+## Story and levels
+
+**The ZimSat Programme.** Director Rudo Chikwanha runs mission control. Zimbabwe is building its own satellite
+fleet and the learner is the newest controller. She briefs every level (with a portrait on the board), reacts
+to the result, and the learner is promoted as stars add up: Cadet → Flight Engineer → Mission Specialist →
+Senior Controller → Flight Director. Finishing every level unlocks the finale.
+
+Each mission now has three levels (12 in all, 36 stars). Level 1 teaches the idea; levels 2 and 3 use it in a
+new situation with new exam-style questions. A level opens when the one before it has at least one star; the
+menu shows a level picker for each mission, and "Next level" carries straight on.
+
+| Mission | Level 1 | Level 2 | Level 3 |
+|---|---|---|---|
+| 1. Field Probe | Survey the Field (g at 1R–4R) | Map the Potential (φ = −GM/r and its graph) | Find the Spot (carry the probe to where g has a given value; g is hidden until recorded) |
+| 2. Into Orbit | Test Flight (400 km) | Earth Watcher (2000 km) | Four-Hour Relay (find the height for T = 4 h, then the speed) |
+| 3. Geostationary | TV Over Harare (geostationary) | Polar Mapper (a 2-hour polar orbit) | Three-Hour Relay (a 3-hour equatorial orbit) |
+| 4. Escape Velocity | Leave Earth (from the surface) | High Platform (from 2R) | From the GEO Depot (from geostationary height) |
+
 Mission 2 is a numerical integration of Newton's law of gravitation (velocity Verlet); mission 4 integrates
 the radial motion the same way, so every speed gives the true result. Data values match the exam data sheet:
 G = 6.67 × 10⁻¹¹ N m² kg⁻², M = 6.00 × 10²⁴ kg, R = 6.40 × 10⁶ m.
@@ -63,4 +81,5 @@ Based on Meta's VR design guidelines and common real-time rendering practice (se
 
 Automated play-throughs on 23 November 2026, all passing with no console errors, in headless desktop Chromium (mouse only) and in the Meta IWER Quest 3 emulator.
 Desktop: 25 checks across all four missions, including mouse drags of the probe, lever and satellite, every launch outcome (crash, ellipse, circle, escape, geostationary drift and lock), and every question set. Quest 3 emulator: 12 checks with hands (finger poke, pinch-carry the probe, pinch-push the lever, ray-pinch LAUNCH) and controllers (ray + trigger, tip poke, ray-drag the lever).
+Story version (23 November 2026): a further 34 desktop checks play levels 2 and 3 of every mission (the potential map, placing instruments by g, the 2000 km and 4-hour orbits, the polar and 3-hour orbits, escape from 2R and from geostationary height), and the level-1 desktop (25) and Quest 3 emulator (13) runs were repeated through the new level picker. All pass with no console errors.
 Testing on a real headset is still to be done.

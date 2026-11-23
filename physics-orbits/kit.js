@@ -296,45 +296,59 @@ export function board(w, h, { res = 1000, bg = null, accent = 0x3fa7ff, light = 
   const pad = 44;
   const acc = hex(accent);
   let lastKey = null;
+  // Draws the items; if they would run off the bottom, draws them again a little smaller (down to 68%).
+  // A { fn } item gets (ctx, x, y, w, k) where k is that scale.
   g.userData.draw = (items, { title = null, accent: titleColor = '#ffd34d' } = {}) => {
     // skip the redraw (and the texture upload) when nothing on the board has changed
     const key = JSON.stringify([title, titleColor, items]);
     if (key === lastKey && !items.some((it) => it && it.fn)) return;
     lastKey = key;
     const { ctx, c } = p;
-    ctx.clearRect(0, 0, c.width, c.height);
-    if (light) { ctx.fillStyle = bg || 'rgba(246,241,226,1)'; roundRect(ctx, 0, 0, c.width, c.height, 18); ctx.fill(); }
-    else {
-      const gr = ctx.createLinearGradient(0, 0, 0, c.height);
-      gr.addColorStop(0, 'rgba(22,40,64,0.97)'); gr.addColorStop(1, 'rgba(8,16,28,0.97)');
-      ctx.fillStyle = bg || gr; roundRect(ctx, 0, 0, c.width, c.height, 22); ctx.fill();
-      // faint technical grid
-      ctx.strokeStyle = 'rgba(120,170,230,0.05)'; ctx.lineWidth = 2;
-      for (let x = 0; x < c.width; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke(); }
-      for (let y = 0; y < c.height; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke(); }
-      ctx.strokeStyle = acc; ctx.globalAlpha = 0.55; ctx.lineWidth = 4; roundRect(ctx, 3, 3, c.width - 6, c.height - 6, 20); ctx.stroke(); ctx.globalAlpha = 1;
-    }
-    let y = pad;
-    ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-    if (title) {
-      ctx.fillStyle = light ? '#7a2e12' : titleColor; ctx.font = `800 52px ${FONT}`;
-      y = wrapText(ctx, title, pad, y, c.width - pad * 2, 60) + 6;
-      const lg = ctx.createLinearGradient(pad, 0, c.width - pad, 0);
-      lg.addColorStop(0, acc); lg.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = lg; ctx.fillRect(pad, y, c.width - pad * 2, 4); y += 22;
-    }
-    for (let it of items) {
-      if (it == null || it === false) continue;
-      if (typeof it === 'string') it = { t: it };
-      if (it.rule) { ctx.fillStyle = light ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.16)'; ctx.fillRect(pad, y + 4, c.width - pad * 2, 3); y += 22; continue; }
-      if (it.fn) { y = it.fn(ctx, pad, y, c.width - pad * 2) ?? y; continue; }
-      const size = it.size || 36;
-      ctx.font = `${it.bold ? '800 ' : '600 '}${size}px ${FONT}`;
-      ctx.fillStyle = it.color || (light ? '#2b2b2b' : '#eef3f8');
-      ctx.textAlign = it.center ? 'center' : 'left';
-      y = wrapText(ctx, it.t, it.center ? c.width / 2 : pad, y, c.width - pad * 2, size * 1.25) + (it.gap ?? 8);
-      ctx.textAlign = 'left';
-    }
+    const render = (k) => {
+      ctx.clearRect(0, 0, c.width, c.height);
+      if (light) { ctx.fillStyle = bg || 'rgba(246,241,226,1)'; roundRect(ctx, 0, 0, c.width, c.height, 18); ctx.fill(); }
+      else {
+        const gr = ctx.createLinearGradient(0, 0, 0, c.height);
+        gr.addColorStop(0, 'rgba(22,40,64,0.97)'); gr.addColorStop(1, 'rgba(8,16,28,0.97)');
+        ctx.fillStyle = bg || gr; roundRect(ctx, 0, 0, c.width, c.height, 22); ctx.fill();
+        // faint technical grid
+        ctx.strokeStyle = 'rgba(120,170,230,0.05)'; ctx.lineWidth = 2;
+        for (let x = 0; x < c.width; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke(); }
+        for (let y = 0; y < c.height; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke(); }
+        ctx.strokeStyle = acc; ctx.globalAlpha = 0.55; ctx.lineWidth = 4; roundRect(ctx, 3, 3, c.width - 6, c.height - 6, 20); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      let y = pad * k;
+      ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+      if (title) {
+        ctx.fillStyle = light ? '#7a2e12' : titleColor; ctx.font = `800 ${Math.round(52 * k)}px ${FONT}`;
+        y = wrapText(ctx, title, pad, y, c.width - pad * 2, 60 * k) + 6 * k;
+        const lg = ctx.createLinearGradient(pad, 0, c.width - pad, 0);
+        lg.addColorStop(0, acc); lg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = lg; ctx.fillRect(pad, y, c.width - pad * 2, 4); y += 22 * k;
+      }
+      for (let it of items) {
+        if (it == null || it === false) continue;
+        if (typeof it === 'string') it = { t: it };
+        if (it.rule) { ctx.fillStyle = light ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.16)'; ctx.fillRect(pad, y + 4 * k, c.width - pad * 2, 3); y += 22 * k; continue; }
+        if (it.fn) { y = it.fn(ctx, pad, y, c.width - pad * 2, k) ?? y; continue; }
+        const size = Math.round((it.size || 36) * k);
+        ctx.font = `${it.bold ? '800 ' : '600 '}${size}px ${FONT}`;
+        ctx.fillStyle = it.color || (light ? '#2b2b2b' : '#eef3f8');
+        ctx.textAlign = it.center ? 'center' : 'left';
+        y = wrapText(ctx, it.t, it.center ? c.width / 2 : pad, y, c.width - pad * 2, size * 1.25) + (it.gap ?? 8) * k;
+        ctx.textAlign = 'left';
+      }
+      return y;
+    };
+    let y = render(1);
+    const room = c.height - 16;
+    if (y > room) {
+      // text height shrinks a little faster than k because lines also re-wrap less: aim slightly under
+      let k = Math.max(0.68, Math.sqrt((room - pad) / (y - pad)) * 0.97);
+      y = render(k);
+      while (y > room && k > 0.69) { k = Math.max(0.68, k * 0.93); y = render(k); }
+      g.userData.scale = k;
+    } else g.userData.scale = 1;
     p.update();
     return y;
   };
@@ -1322,4 +1336,141 @@ export function start() {
     renderer.render(scene, camera);
     hud.update();
   });
+}
+
+// ---------------------------------------------------------------- story characters
+// A simple painted portrait in a round badge (no image files): head, hair, shoulders and optional
+// headset, glasses or lab coat. look = { skin, hair: 'short' | 'wrap' | 'bun', hairColor, top, accent, headset, glasses, coat }
+export function drawPortrait(ctx, cx, cy, r, look = {}) {
+  const { skin = '#7a4a2e', hair = 'short', hairColor = '#1b1410', top = '#1f4e79', accent = '#5fd1ff', headset = false, glasses = false, coat = false } = look;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.closePath();
+  const bgr = ctx.createRadialGradient(cx, cy - r * 0.3, r * 0.1, cx, cy, r);
+  bgr.addColorStop(0, '#2b4a6b'); bgr.addColorStop(1, '#0d1a2a');
+  ctx.fillStyle = bgr; ctx.fill();
+  ctx.clip();
+  // shoulders
+  ctx.fillStyle = coat ? '#eef2f5' : top;
+  ctx.beginPath(); ctx.ellipse(cx, cy + r * 1.02, r * 0.86, r * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+  if (coat) {                          // lab coat lapels over a coloured shirt
+    ctx.fillStyle = top; ctx.beginPath(); ctx.moveTo(cx - r * 0.2, cy + r * 0.45); ctx.lineTo(cx + r * 0.2, cy + r * 0.45); ctx.lineTo(cx, cy + r * 0.85); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#b8c2cc'; ctx.lineWidth = r * 0.03; ctx.beginPath(); ctx.moveTo(cx - r * 0.2, cy + r * 0.45); ctx.lineTo(cx - r * 0.05, cy + r); ctx.moveTo(cx + r * 0.2, cy + r * 0.45); ctx.lineTo(cx + r * 0.05, cy + r); ctx.stroke();
+  }
+  // neck and head
+  ctx.fillStyle = skin;
+  ctx.fillRect(cx - r * 0.13, cy + r * 0.12, r * 0.26, r * 0.32);
+  ctx.beginPath(); ctx.ellipse(cx, cy - r * 0.08, r * 0.33, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+  // hair
+  ctx.fillStyle = hairColor;
+  if (hair === 'wrap') {               // a head wrap
+    ctx.fillStyle = accent;
+    ctx.beginPath(); ctx.ellipse(cx, cy - r * 0.36, r * 0.38, r * 0.26, 0, Math.PI, 0); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + r * 0.08, cy - r * 0.52, r * 0.26, r * 0.16, -0.3, 0, Math.PI * 2); ctx.fill();
+  } else if (hair === 'bun') {
+    ctx.beginPath(); ctx.ellipse(cx, cy - r * 0.3, r * 0.35, r * 0.22, 0, Math.PI, 0); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.55, r * 0.15, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.beginPath(); ctx.ellipse(cx, cy - r * 0.3, r * 0.35, r * 0.2, 0, Math.PI, 0); ctx.fill();
+  }
+  // face: eyes and a small smile
+  ctx.fillStyle = '#120c08';
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + s * r * 0.12, cy - r * 0.1, r * 0.035, 0, Math.PI * 2); ctx.fill(); }
+  ctx.strokeStyle = '#3a2015'; ctx.lineWidth = r * 0.03; ctx.beginPath(); ctx.arc(cx, cy + r * 0.04, r * 0.11, 0.2, Math.PI - 0.2); ctx.stroke();
+  if (glasses) {
+    ctx.strokeStyle = '#d9e2ea'; ctx.lineWidth = r * 0.03;
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + s * r * 0.12, cy - r * 0.1, r * 0.085, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.035, cy - r * 0.1); ctx.lineTo(cx + r * 0.035, cy - r * 0.1); ctx.stroke();
+  }
+  if (headset) {
+    ctx.strokeStyle = '#222a33'; ctx.lineWidth = r * 0.06;
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.1, r * 0.4, Math.PI * 1.08, Math.PI * 1.92); ctx.stroke();
+    ctx.fillStyle = '#222a33'; ctx.beginPath(); ctx.ellipse(cx - r * 0.37, cy - r * 0.06, r * 0.07, r * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = accent; ctx.lineWidth = r * 0.03;
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.36, cy + r * 0.02); ctx.quadraticCurveTo(cx - r * 0.3, cy + r * 0.2, cx - r * 0.08, cy + r * 0.17); ctx.stroke();
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(cx - r * 0.08, cy + r * 0.17, r * 0.035, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+  ctx.strokeStyle = accent; ctx.lineWidth = Math.max(3, r * 0.06);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+}
+// A board item: the character's portrait with their name and what they say.
+export function storyStrip(char, text, { color = '#ffffff' } = {}) {
+  return { fn: (ctx, x, y, w, k = 1) => {
+    const d = 100 * k, pad = 12 * k, tx = x + d + pad * 2.2, tw = w - d - pad * 3.4;
+    const nameSize = Math.round(24 * k), size = Math.round(27 * k), lh = size * 1.2;
+    ctx.font = `600 ${size}px ${FONT}`;
+    const textH = wrapText(ctx, text, 0, 0, tw, lh, false);
+    const h = Math.max(d + pad * 2, textH + nameSize * 1.4 + pad * 2);
+    const gr = ctx.createLinearGradient(x, y, x + w, y);
+    gr.addColorStop(0, 'rgba(95,209,255,0.16)'); gr.addColorStop(1, 'rgba(95,209,255,0.03)');
+    ctx.fillStyle = gr; roundRect(ctx, x, y, w, h, 18 * k); ctx.fill();
+    drawPortrait(ctx, x + pad + d / 2, y + pad + d / 2, d / 2, char.look);
+    ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.font = `800 ${nameSize}px ${FONT}`; ctx.fillStyle = char.color || '#7fdcff';
+    ctx.fillText(char.name, tx, y + pad);
+    ctx.font = `600 ${size}px ${FONT}`; ctx.fillStyle = color;
+    wrapText(ctx, text, tx, y + pad + nameSize * 1.35, tw, lh);
+    return y + h + 12 * k;
+  } };
+}
+
+// ---------------------------------------------------------------- campaign: chapters of levels
+// Stars for every level are saved in this browser. Level 1 of each chapter is always open; each later
+// level opens when the one before it has been finished. The menu shows a row of chapter buttons; a
+// chapter button opens a row of level buttons.
+export function campaign({ key, legacyKey = null, chapters, parent, row = { x0: -0.4, dx: 0.215, w: 0.2, h: 0.14 }, colors = [],
+  onHome = () => {}, onChapter = () => {}, onPlay = () => {} }) {
+  const stars = chapters.map((ch) => ch.levels.map(() => 0));
+  const load = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
+  const saved = load(key);
+  if (Array.isArray(saved)) saved.forEach((a, c) => Array.isArray(a) && a.forEach((n, l) => { if (stars[c] && l < stars[c].length) stars[c][l] = n | 0; }));
+  else if (legacyKey) { const old = load(legacyKey); if (Array.isArray(old)) old.forEach((n, c) => { if (stars[c]) stars[c][0] = n | 0; }); }
+  const persist = () => { try { localStorage.setItem(key, JSON.stringify(stars)); } catch { /* storage blocked */ } };
+  const st = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
+  const C = {
+    stars, chapters, current: -1,
+    get: (c, l) => stars[c][l],
+    unlocked: (c, l) => l === 0 || stars[c][l - 1] > 0,
+    save(c, l, n) { stars[c][l] = Math.max(stars[c][l], n); persist(); },
+    chapterStars: (c) => stars[c].reduce((a, b) => a + b, 0),
+    total: () => stars.flat().reduce((a, b) => a + b, 0),
+    max: () => stars.flat().length * 3,
+    levelsDone: () => stars.flat().filter((n) => n > 0).length,
+    nextUp() { for (let c = 0; c < stars.length; c++) for (let l = 0; l < stars[c].length; l++) if (stars[c][l] === 0 && C.unlocked(c, l)) return { c, l }; return null; },
+    homeGroup: new THREE.Group(), levelGroup: new THREE.Group(), chapterButtons: [], levelButtons: [],
+  };
+  parent.add(C.homeGroup, C.levelGroup);
+  chapters.forEach((ch, c) => {
+    const b = actionButton(`${c + 1}. ${ch.short}`, row.w, row.h, () => C.openChapter(c), { bg: colors[c] || '#1f6fb2', size: 25, name: `Open ${ch.short}` });
+    b.position.set(row.x0 + c * row.dx, 0.0, 0);
+    C.homeGroup.add(b); C.chapterButtons.push(b);
+  });
+  for (let l = 0; l < 3; l++) {
+    const b = actionButton(`Level ${l + 1}`, 0.25, 0.17, () => { if (C.current >= 0) onPlay(C.current, l); }, { bg: '#1f6fb2', size: 24, name: `Play level ${l + 1}` });
+    b.position.set(-0.4 + l * 0.27, 0.01, 0);
+    C.levelGroup.add(b); C.levelButtons.push(b);
+  }
+  C.levelGroup.visible = false;
+  C.openHome = () => {
+    C.current = -1;
+    C.homeGroup.visible = true; C.levelGroup.visible = false;
+    C.chapterButtons.forEach((b, c) => b.userData.draw(`${c + 1}. ${chapters[c].short}\n★ ${C.chapterStars(c)} / ${stars[c].length * 3}`));
+    onHome();
+  };
+  C.openChapter = (c) => {
+    C.current = c;
+    C.homeGroup.visible = false; C.levelGroup.visible = true;
+    C.levelButtons.forEach((b, l) => {
+      const lv = chapters[c].levels[l];
+      b.visible = !!lv;
+      if (!lv) return;
+      const open = C.unlocked(c, l);
+      b.userData.setOn(open);
+      if (open) b.userData.draw(`Level ${l + 1}\n${lv.name}\n${st(stars[c][l])}`, colors[c] || '#1f6fb2');
+      else b.userData.draw(`Level ${l + 1}\n${lv.name}\n(locked)`);
+    });
+    onChapter(c);
+  };
+  C.starText = st;
+  return C;
 }
