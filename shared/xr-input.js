@@ -45,8 +45,10 @@ export function localBox(obj, refresh = false) {
   const out = new THREE.Box3();
   obj.traverse((o) => {
     if (!o.geometry || o.isSprite || o.isLine || o.userData.noBox) return;
-    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-    _box.copy(o.geometry.boundingBox).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+    // an InstancedMesh's geometry is one instance; its own box covers all the instances
+    if (o.isInstancedMesh) o.computeBoundingBox();
+    else if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    _box.copy(o.isInstancedMesh ? o.boundingBox : o.geometry.boundingBox).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
     out.union(_box);
   });
   if (out.isEmpty()) out.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(0.05, 0.05, 0.05));

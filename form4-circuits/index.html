@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Circuit Workshop: Electricity</title>
+<meta name="description" content="Form 4 Integrated Science VR game: build series and parallel circuits, use ammeters and voltmeters, apply Ohm's law, wire a 3-pin plug and choose fuses. Works in the Meta Quest Browser and on desktop.">
+<link rel="stylesheet" href="../shared/game.css">
+</head>
+<body>
+<div id="loading">Loading the workshop…</div>
+<div id="help">
+  <h1>Circuit Workshop: Electricity <small>Form 4</small></h1>
+  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
+  <ul>
+    <li><b>Pinch</b> a part on the tray to pick it up, then pinch over a glowing gap on the circuit board to put it in.</li>
+    <li>Pinch a <b>switch</b> on the board to open or close it. Pinch any other part on the board to take it out again.</li>
+    <li><b>Touch</b> buttons with a fingertip. Choose a level on the panel to your left.</li>
+  </ul>
+  <p>On a computer: <b>click</b> parts, gaps and buttons, <b>drag</b> to look around, <kbd>R</kbd> to reset the view.</p>
+  <button id="helpToggle">Hide help</button>
+</div>
+<script type="importmap">
+{ "imports": { "three": "../shared/vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

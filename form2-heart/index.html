@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Heartbeat: The Heart and Circulation</title>
+<meta name="description" content="Form 2 Integrated Science VR game: label a cut-open heart, guide a blood cell round the double circulation and answer a heart quiz. Works in the Meta Quest Browser and on desktop.">
+<link rel="stylesheet" href="../shared/game.css">
+</head>
+<body>
+<div id="loading">Loading the heart…</div>
+<div id="help">
+  <h1>Heartbeat: The Heart and Circulation <small>Form 2</small></h1>
+  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
+  <ul>
+    <li><b>Pinch</b> a label to pick it up, then pinch at a glowing dot on the heart to place it (or point at the dot and pinch).</li>
+    <li>To choose a part of the heart, <b>touch it and pinch</b>, or point at it and pinch.</li>
+    <li>Choose a level on the panel to your left.</li>
+  </ul>
+  <p>On a computer: <b>click</b> labels, dots and parts, <b>drag</b> to look around, <kbd>R</kbd> to reset the view.</p>
+  <button id="helpToggle">Hide help</button>
+</div>
+<script type="importmap">
+{ "imports": { "three": "../shared/vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
