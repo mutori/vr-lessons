@@ -15,6 +15,8 @@ const E_CH = 1.6e-19, U = 1.66e-27;
 // one colour language across the games
 const COL = { field: 0x5fb0ff, current: 0xffd34d, force: 0x3ddc84, efield: 0xff6b5a, north: 0xd8463b, south: 0x2f6fd6, accent: 0x5fd1ff, copper: 0xc8793a };
 const cssOf = (c) => '#' + new THREE.Color(c).getHexString();
+// first clause of a message, for a short toast (keeps decimals such as 2.6 intact)
+const headline = (msg) => msg.match(/^.*?(?:!|(?=[.:?](?:\s|$))|$)/)[0];
 const dragWord = () => (input.kind === 'hand' ? 'pinch and move' : input.kind === 'controller' ? 'point at, hold the trigger and move' : 'drag');
 
 // ---------------------------------------------------------------- the lab
@@ -1560,7 +1562,7 @@ m4.complete = function (i, msg) {
   if (this.done[i] || this.task !== i) return;
   this.done[i] = true; this.task = i + 1;
   this.note = msg;
-  sfx.good(); toast(msg.split(':')[0].split('.')[0], 'good', 2.6);
+  sfx.good(); toast(headline(msg), 'good', 2.6);
   if (this.task === 4) { this.flipBtn.userData.setOn(true); hint.show(this.flipBtn, [0, 0.07, 0.02]); }
   this.redraw();
   if (this.task >= this.TASKS.length) this.questions();
@@ -1845,7 +1847,7 @@ m5.complete = function (i, msg) {
   if (this.done[i] || this.task !== i) return;
   this.done[i] = true; this.task = i + 1; this.holdT = 0;
   this.note = msg;
-  sfx.good(); toast(msg.split('.')[0], 'good', 2.6);
+  sfx.good(); toast(headline(msg), 'good', 2.6);
   if (this.task === 1) hint.show(this.motor.group, [0, 0.16, 0.03]);
   if (this.task === 3) { this.checkBtn.userData.setOn(true); }
   this.redraw();
@@ -1924,7 +1926,9 @@ m5.tick = function (dt, t) {
   this.scopeT = (this.scopeT || 0) + dt;
   if (this.scopeT > 1 / 30) { this.scopeT = 0; this.drawScope(); }
   // bulb, coil glow, hum
-  const lvl = clamp(Math.abs(emf) / 3.4, 0, 1.3);
+  // the filament has thermal lag: it glows with the smoothed power (∝ E²), so it flickers only at low speeds
+  this.heat = (this.heat || 0) + ((emf / 3.4) ** 2 - (this.heat || 0)) * (1 - Math.exp(-dt / 0.12));
+  const lvl = clamp(Math.sqrt(2 * this.heat), 0, 1.3);
   this.bulbGlass.material.emissiveIntensity = 2.5 * lvl;
   this.bulbGlow.material.opacity = Math.min(1, lvl);
   this.bulbLight.intensity = 0.6 * lvl;
