@@ -7,7 +7,7 @@ import {
   THREE, scene, camera, renderer, input, mat, basic, glowMat, mesh, noHit, sig, board, textSprite, arrow,
   actionButton, slider, dial, toggle, grabbable, beacon, toaster, quiz, makeInteractive, sfx, tween, wait, onFrame, start, words,
   view, onKindChange, shuffle, closestOnLineToRay, clamp, setEnvironment, glowSprite, blobShadow, fx, shockwave, celebrate,
-  canvasPlane, roundRect, ambience, easeOut,
+  canvasPlane, roundRect, ambience, easeOut, storyStrip, campaign,
 } from './kit.js';
 
 const V3 = THREE.Vector3;
@@ -201,7 +201,7 @@ const Q = quiz({ textBoard: info, answerGroup, w: 0.3, h: 0.1, gapX: 0.34, gapY:
 const menuBtn = actionButton('Menu', 0.15, 0.065, () => openMenu(), { bg: '#4b5d6e', size: 28 });
 menuBtn.position.set(0.47, 0.16, 0);
 panel.add(menuBtn);
-const restartBtn = actionButton('Restart', 0.15, 0.065, () => current && startMission(missions.indexOf(current)), { bg: '#4b5d6e', size: 28, name: 'Restart this experiment' });
+const restartBtn = actionButton('Restart', 0.15, 0.065, () => current && startMission(missions.indexOf(current), current.lv), { bg: '#4b5d6e', size: 28, name: 'Restart this experiment' });
 restartBtn.position.set(0.47, 0.08, 0);
 panel.add(restartBtn);
 
@@ -259,76 +259,99 @@ function beadTrail(color, n, parent, radius = 0.0032, spacing = 0.006) {
 }
 const poleLabel = (t, c) => textSprite(t, { size: 0.045, bg: c === 'N' ? 'rgba(160,30,25,0.9)' : 'rgba(25,60,160,0.9)', border: 'rgba(255,255,255,0.5)' });
 
-// ---------------------------------------------------------------- stars saved in this browser
-const STORE = 'field-lab-v2';
-const N_EXP = 5;
-let stars = new Array(N_EXP).fill(0);
-try { const s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (Array.isArray(s)) stars = stars.map((_, i) => s[i] | 0); } catch { /* storage blocked */ }
-function saveStars(i, n) {
-  stars[i] = Math.max(stars[i], n);
-  try { localStorage.setItem(STORE, JSON.stringify(stars)); } catch { /* storage blocked */ }
-}
-const starText = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
+// ---------------------------------------------------------------- the story: power for Chinyika Clinic
+// Dr Farai Moyo runs the Field Lab. The lab is building a small hydro station for a rural clinic;
+// every experiment tests a part of it. Your rank rises with your stars.
+const CHIEF = { name: 'Dr Farai Moyo · head of the Field Lab', color: '#9fe2bf',
+  look: { skin: '#5a3420', hair: 'short', top: '#2e6b4f', accent: '#ffd34d', glasses: true, coat: true } };
+const RANKS = [[0, 'Lab Assistant'], [8, 'Technician'], [18, 'Engineer'], [30, 'Senior Engineer'], [42, 'Chief Engineer']];
+const rankOf = (n) => RANKS.filter(([k]) => n >= k).pop()[1];
+const CHAPTER_STORY = [
+  'Chinyika Clinic has no mains power. We are building a small hydro station for it, and the clinic needs water pumps and cooling fans. Every one of them is a motor: a wire in a magnetic field. Let\'s get the force right.',
+  'The clinic\'s X-ray room needs radiation monitors, and the station needs particle detectors. To build them we must know how charged particles move in a magnetic field.',
+  'The clinic\'s water must be tested. Our mass spectrometer weighs atoms one at a time, so we can tell exactly what is in a sample.',
+  'Now for the heart of any power station: induction. Move a magnet near a coil and a current flows. Learn the rules and we can make electricity from moving water.',
+  'Last job: the generator itself. The river turns it, it makes alternating current, and the clinic lights come on.',
+];
+const FINALE = 'Chinyika Clinic has power. The pumps run, the fridge keeps vaccines cold, and the lights stay on at night. Thank you, Chief Engineer.';
 
 // ---------------------------------------------------------------- experiment framework
 let current = null;
 const missions = [];
+let C = null;                          // the campaign (stars and the level picker), set up after the experiments
+const lvl = (m) => m.levels[m.lv || 0] || m.levels[0];
+const heading = (m) => `Experiment ${missions.indexOf(m) + 1}.${(m.lv || 0) + 1}: ${lvl(m).name}`;
+// The top of every level's instructions: Dr Moyo's briefing.
+const brief = (m) => storyStrip(CHIEF, lvl(m).brief);
+const starText = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
 function hideAll() {
   for (const m of missions) { if (m.world.visible || m === current) m.leave?.(); m.controls.visible = false; m.world.visible = false; }
   Q.cancel(); toast.hide(); hint.hide();
 }
-function startMission(i) {
+function startMission(i, l = 0) {
   sfx.whoosh();
   hideAll();
+  C.homeGroup.visible = false; C.levelGroup.visible = false;
   current = missions[i];
+  current.lv = clamp(l, 0, current.levels.length - 1);
+  current.setLevel?.(current.lv);
   menuGroup.visible = false; doneGroup.visible = false;
   restartBtn.visible = true; menuBtn.visible = true;
   current.controls.visible = true; current.world.visible = true;
   current.world.scale.setScalar(current.scale0 * 0.6);
   tween(0.5, (k) => current && current.world.scale.setScalar(current.scale0 * (0.6 + 0.4 * k)), easeOut);
   current.enter();
+  toast(`Level ${current.lv + 1}: ${lvl(current).name}`, 'info', 2.2);
 }
 const doneGroup = new THREE.Group();
 panel.add(doneGroup);
 doneGroup.visible = false;
-const nextBtn = actionButton('Next experiment', 0.32, 0.1, () => startMission(nextBtn.userData.next), { bg: '#1e8449', size: 30 });
+const nextBtn = actionButton('Next level', 0.32, 0.1, () => startMission(nextBtn.userData.next.i, nextBtn.userData.next.l), { bg: '#1e8449', size: 30 });
 nextBtn.position.set(-0.12, 0, 0);
-const againBtn = actionButton('Play again', 0.22, 0.1, () => current && startMission(missions.indexOf(current)), { bg: '#4b5d6e', size: 28 });
+const againBtn = actionButton('Play again', 0.22, 0.1, () => current && startMission(missions.indexOf(current), current.lv), { bg: '#4b5d6e', size: 28 });
 againBtn.position.set(0.18, 0, 0);
 doneGroup.add(nextBtn, againBtn);
 function finishMission(m, n, lines = []) {
-  const i = missions.indexOf(m);
-  saveStars(i, n);
+  const i = missions.indexOf(m), l = m.lv || 0;
+  const before = rankOf(C.total());
+  C.save(i, l, n);
+  const after = rankOf(C.total());
   m.controls.visible = false;
   Q.cancel(); hint.hide();
   celebrate(new V3(0, 1.6, -1.1), { stars: n });
+  const lastLevel = l >= m.levels.length - 1, lastExp = i >= missions.length - 1;
+  const next = !lastLevel ? { i, l: l + 1 } : !lastExp ? { i: i + 1, l: 0 } : null;
+  const allDone = C.levelsDone() === C.stars.flat().length;
   info.userData.draw([
-    { t: `Experiment complete  ${starText(n)}`, size: 46, bold: true, color: '#ffd34d', gap: 16 },
+    { t: `Level complete  ${starText(n)}`, size: 46, bold: true, color: '#ffd34d', gap: 12 },
+    lvl(m).debrief && storyStrip(CHIEF, lvl(m).debrief),
     ...lines,
     { rule: true },
-    i < missions.length - 1 ? { t: `Next: Experiment ${i + 2}, ${missions[i + 1].short}. Use the green button on the panel.`, size: 32, color: '#9fe2bf' }
-      : { t: 'You have finished all five experiments. Excellent work!', size: 34, color: '#9fe2bf' },
-  ], { title: m.title });
+    after !== before ? { t: `Promoted! Your rank is now ${after}.`, size: 34, bold: true, color: '#ffd34d' } : { t: `Rank: ${after}  ·  ${C.total()} of ${C.max()} stars`, size: 29, color: '#9fb6cc' },
+    next ? { t: `Next: Experiment ${next.i + 1}.${next.l + 1}, ${missions[next.i].levels[next.l].name}. Use the green button on the panel.`, size: 30, color: '#9fe2bf' }
+      : { t: allDone ? FINALE : 'That was the last level. Use Menu to replay any level for more stars.', size: 31, color: '#9fe2bf' },
+  ].filter(Boolean), { title: heading(m) });
   doneGroup.visible = true;
-  nextBtn.visible = i < missions.length - 1;
-  nextBtn.userData.next = i + 1;
-  if (nextBtn.visible) hint.show(nextBtn, [0, 0.08, 0.02]);
+  nextBtn.visible = !!next;
+  if (next) {
+    nextBtn.userData.next = next;
+    nextBtn.userData.draw(next.i === i ? 'Next level' : 'Next experiment');
+    hint.show(nextBtn, [0, 0.08, 0.02]);
+  }
 }
 const askIf = (m) => (o) => (current === m ? Q.ask(o) : Promise.resolve(true));
 
 const menuGroup = new THREE.Group();
 panel.add(menuGroup);
-const missionButtons = [];
 function openMenu() {
   hideAll();
   doneGroup.visible = false;
   current = null;
   menuGroup.visible = true;
-  restartBtn.visible = false; menuBtn.visible = false;
-  missionButtons.forEach((b, i) => b.userData.draw(`${i + 1}. ${missions[i].short}\n${starText(stars[i])}`));
-  const next = stars.findIndex((s) => s === 0);
-  hint.show(missionButtons[next < 0 ? 0 : next], [0, 0.1, 0.02]);
-  drawWelcome();
+  restartBtn.visible = false; menuBtn.visible = true;
+  C.openHome();
+}
+function drawDataSheet() {
   data.userData.draw([
     { t: 'Data', size: 38, bold: true, color: '#ffd34d', gap: 10 },
     { t: 'e = 1.60 × 10⁻¹⁹ C       1 u = 1.66 × 10⁻²⁷ kg', size: 31, color: '#cfe3ff' },
@@ -340,31 +363,52 @@ function openMenu() {
     { t: 'r = mv / Bq          E = V / d', size: 31 },
     { t: 'Φ = BA       E = −N dΦ/dt       E = BANω sin ωt', size: 31 },
     { rule: true },
-    { t: `Stars: ${stars.map((s, i) => `${i + 1} ${starText(s)}`).join('  ')}`, size: 26, color: '#9fe2bf' },
+    ...missions.map((m, i) => ({ t: `Experiment ${i + 1}:  ${C.stars[i].map((n) => starText(n)).join('   ')}`, size: 26, color: '#9fe2bf', gap: 3 })),
   ], { title: 'Field Lab' });
 }
 function drawWelcome() {
   const w = words();
+  const total = C.total(), up = C.nextUp();
   info.userData.draw([
-    { t: 'Form 6 · Electromagnetism, charged particles and induction', size: 31, color: '#9fb6cc', gap: 12 },
-    { t: 'Magnetic forces act in three dimensions. Walk round them, test your predictions, then measure.', size: 32, gap: 10 },
-    { t: '1. Motor Effect: predict the force on a wire.', size: 29, color: '#cfe3ff' },
-    { t: '2. Particle Paths: steer particles onto a detector.', size: 29, color: '#cfe3ff' },
-    { t: '3. Mass Spectrometer: select a speed, weigh atoms.', size: 29, color: '#cfe3ff' },
-    { t: '4. Induction: push a magnet into a coil.', size: 29, color: '#cfe3ff' },
-    { t: '5. Generator: make alternating current.', size: 29, color: '#cfe3ff', gap: 10 },
+    storyStrip(CHIEF, total === 0
+      ? 'Welcome to the Field Lab. We are building a hydro power station for Chinyika Clinic, and every part depends on magnetic fields. Learn the physics, test the parts, earn your stars.'
+      : C.levelsDone() === C.stars.flat().length ? FINALE : 'Welcome back. The next test is set up on the bench.'),
+    { t: `Rank: ${rankOf(total)}   ·   ${total} of ${C.max()} stars   ·   ${C.levelsDone()} of ${C.stars.flat().length} levels`, size: 30, bold: true, color: '#ffd34d', gap: 10 },
+    { t: 'Form 6 · Electromagnetism, charged particles and induction. Five experiments, three levels each: level 1 teaches the idea, levels 2 and 3 put it to work.', size: 29, color: '#9fb6cc', gap: 10 },
     { rule: true },
     { t: input.kind === 'hand' ? 'Touch buttons with a fingertip. Pinch glowing things to grab, turn or slide them. For far things, point and pinch.'
       : input.kind === 'controller' ? 'Touch buttons with the controller tip, or point and pull the trigger. Hold the trigger on a knob or object to move it.'
-        : 'Click buttons. Drag knobs, handles and glowing objects. Drag the background to look around.', size: 28, color: '#ffd34d' },
-    { t: `Choose an experiment on the panel (${w.select} it).`, size: 28, color: '#ffd34d' },
+        : 'Click buttons. Drag knobs, handles and glowing objects. Drag the background to look around.', size: 27, color: '#ffd34d' },
+    { t: `Choose an experiment on the panel (${w.select} it)${up ? `. Next up: Experiment ${up.c + 1}.${up.l + 1}` : ''}.`, size: 27, color: '#ffd34d' },
   ], { title: 'Field Lab' });
+}
+function drawChapter(c) {
+  const m = missions[c];
+  info.userData.draw([
+    storyStrip(CHIEF, CHAPTER_STORY[c]),
+    ...m.levels.map((v, l) => ({ t: `Level ${l + 1}: ${v.name}   ${C.unlocked(c, l) ? starText(C.get(c, l)) : '(finish level ' + l + ' first)'}`, size: 30, bold: l === 0, color: C.unlocked(c, l) ? '#cfe3ff' : '#8a97a5', gap: 6 })),
+    { rule: true },
+    { t: 'Level 1 teaches the idea. Levels 2 and 3 use it in new situations, with harder questions. Replay any level to improve your stars.', size: 27, color: '#9fb6cc' },
+    { t: 'Press Menu to go back.', size: 27, color: '#ffd34d' },
+  ], { title: `Experiment ${c + 1}: ${m.short}` });
 }
 onKindChange(() => { if (!current) drawWelcome(); else current.redraw?.(); });
 
 // ================================================================= Experiment 1: Motor Effect
 const AIM_R = 0.2;
 const m1 = { title: 'Experiment 1: Motor Effect', short: 'Motor Effect', controls: new THREE.Group(), world: new THREE.Group(), scale0: 1.45 };
+// Part B target: the force F the learner must set by turning the wire (accepted within tol newtons).
+m1.levels = [
+  { name: 'Fleming\'s Rule', rounds: 4, hand: true, B: 0.20, I: 3.0, L: 0.050, target: 0.015, tol: 1e-5, goal: 'exactly HALF its biggest value', mark: 'half',
+    brief: 'Every pump and fan at the station is a motor: a current in a magnetic field. First, show me you can predict which way the wire is pushed. Then we will control how hard.',
+    debrief: 'Good. Left hand for motors: you will use it all day here.' },
+  { name: 'Pump Motor Check', rounds: 6, hand: false, B: 0.20, I: 3.0, L: 0.050, target: 0.0225, tol: 0.00024, goal: 'three-quarters (75%) of its biggest value', mark: '75%',
+    brief: 'The water pump motor is on the bench. Six set-ups this time, and the hand chart is locked away: use your own left hand. Then set the force to 75% of full.',
+    debrief: 'The pump passes. Tuning the angle like that is how motor designers control the turning force.' },
+  { name: 'Fan Motor Spec', rounds: 6, hand: false, B: 0.15, I: 4.0, L: 0.060, target: 0.025, tol: 0.0003, goal: 'exactly 0.025 N (the fan\'s spec)', mark: '0.025 N',
+    brief: 'The ward fan uses a weaker magnet but more current and a longer wire. The spec sheet says 0.025 N on each side. Work out the angle that gives it.',
+    debrief: 'Spec met. The fans will keep the ward cool, even in October.' },
+];
 missions.push(m1);
 panel.add(m1.controls); app.add(m1.world);
 m1.world.position.set(0, 0.33, 0);
@@ -495,16 +539,19 @@ m1.world.position.set(0, 0.33, 0);
   m1.lockBtn.position.set(-0.18, -0.07, 0);
   m1.controls.add(m1.angle.group, m1.lockBtn);
 }
-m1.makeRounds = function () {
+m1.makeRounds = function (count = 4) {
   const keys = Object.keys(DIRS);
   const all = [];
   for (const b of keys) for (const i of keys) if (b[1] !== i[1]) all.push([b, i]);
   const mustZ = shuffle(all.filter(([b, i]) => b[1] === 'z' || i[1] === 'z'));
   const noZ = shuffle(all.filter(([b, i]) => b[1] !== 'z' && i[1] !== 'z'));
-  return [noZ[0], mustZ[0], noZ.find((r) => r[0][1] !== noZ[0][0][1]) || noZ[1], mustZ.find((r) => r[1][1] === 'z' && r !== mustZ[0]) || mustZ[1]];
+  const r = [noZ[0], mustZ[0], noZ.find((q) => q[0][1] !== noZ[0][0][1]) || noZ[1], mustZ.find((q) => q[1][1] === 'z' && q !== mustZ[0]) || mustZ[1]];
+  // extra rounds: random set-ups not used yet
+  for (const q of shuffle(all)) { if (r.length >= count) break; if (!r.includes(q)) r.push(q); }
+  return r;
 };
 m1.enter = function () {
-  this.rounds = this.makeRounds();
+  this.rounds = this.makeRounds(lvl(this).rounds);
   this.round = 0; this.right = 0; this.hints = 0; this.angleTries = 0; this.powered = false;
   this.setRound();
 };
@@ -526,7 +573,7 @@ m1.setRound = function () {
   this.table.visible = false; this.turnHandle.visible = false;
   this.dirBtns.forEach((b) => { b.visible = true; b.userData.setOn(true); });
   this.testBtn.visible = true; this.testBtn.userData.setOn(false);
-  this.handBtn.visible = true; this.handBtn.userData.setOn(true);
+  this.handBtn.visible = lvl(this).hand; this.handBtn.userData.setOn(true);
   this.angle.group.visible = false; this.lockBtn.visible = false;
   hint.show(this.aimHandle, [0, 0.06, 0]);
   this.redraw(); this.drawData();
@@ -619,41 +666,45 @@ m1.showHand = function (on) {
 m1.redraw = function () {
   if (Q.active || this.phase === 'done' || this.phase === 'quiz') return;
   const w = words();
+  const L = lvl(this);
   if (this.phase === 'angle' || this.phase === 'angleDone') {
     info.userData.draw([
       { t: 'Part B: F = BIL sin θ', size: 36, bold: true, color: '#ffd34d' },
       { t: 'The wire now lies on a turntable. θ is the angle between the wire (the current) and the field. The current is switched on.', size: 30, gap: 10 },
-      { t: `Task: turn the wire (${dragWord()} its white end, or use the slider) so the force is exactly HALF its biggest value. Then lock it in.`, size: 31, color: '#ffd34d', gap: 10 },
-      { t: 'B = 0.20 T,  I = 3.0 A,  length in the field L = 5.0 cm', size: 29, color: '#cfe3ff' },
+      { t: `Task: turn the wire (${dragWord()} its white end, or use the slider) so the force is ${L.goal}. Then lock it in.`, size: 31, color: '#ffd34d', gap: 10 },
+      { t: `B = ${L.B.toFixed(2)} T,  I = ${L.I.toFixed(1)} A,  length in the field L = ${(L.L * 100).toFixed(1)} cm`, size: 29, color: '#cfe3ff' },
       this.angleMsg && { rule: true },
       this.angleMsg && { t: this.angleMsg, size: 29, color: '#ffb3a3' },
-    ], { title: this.title });
+    ], { title: heading(this) });
     return;
   }
   info.userData.draw([
-    { t: `Round ${this.round + 1} of ${this.rounds.length}`, size: 34, bold: true, color: '#ffd34d' },
+    this.round === 0 && !this.result && brief(this),
+    { t: `Round ${this.round + 1} of ${this.rounds.length}${L.hand ? '' : '   (no hand chart: use your own left hand)'}`, size: 34, bold: true, color: '#ffd34d' },
     { t: 'A current flows in a wire between the poles of a magnet. Blue arrows: the field (N to S). Yellow cones: the current.', size: 30, gap: 8 },
     { t: `Predict the force on the wire: ${dragWord()} the green ball to aim the arrow, or use the direction buttons. Then switch on and test.`, size: 30, color: '#ffd34d', gap: 8 },
     { t: 'Walk round or lean in: some of these point towards you or away.', size: 27, color: '#9fb6cc' },
     this.result && { rule: true },
     this.result && { t: this.result.text, size: 29, color: this.result.ok ? '#8ef0a8' : '#ffb3a3' },
-  ], { title: this.title });
+  ], { title: heading(this) });
 };
+m1.Fmax = function () { const L = lvl(this); return L.B * L.I * L.L; };
 m1.drawData = function () {
   if (this.phase === 'angle' || this.phase === 'angleDone') {
-    const th = this.angle.value, F = 0.2 * 3 * 0.05 * Math.sin(th * Math.PI / 180);
+    const L = lvl(this), Fmax = this.Fmax();
+    const th = this.angle.value, F = Fmax * Math.sin(th * Math.PI / 180), mk = L.target / Fmax;
     data.userData.draw([
       { t: `θ = ${th.toFixed(0)}°        sin θ = ${Math.sin(th * Math.PI / 180).toFixed(3)}`, size: 34, bold: true },
-      { t: 'F = BIL sin θ = 0.20 × 3.0 × 0.050 × sin θ', size: 29, color: '#cfe3ff' },
+      { t: `F = BIL sin θ = ${L.B.toFixed(2)} × ${L.I.toFixed(1)} × ${L.L.toFixed(3)} × sin θ`, size: 29, color: '#cfe3ff' },
       { t: `F = ${F.toFixed(4)} N`, size: 42, bold: true, color: '#3ddc84' },
-      { fn: (ctx, x, y, wd) => {                    // a force meter bar
+      { fn: (ctx, x, y, wd) => {                    // a force meter bar with the target marked
         const h = 44; ctx.fillStyle = 'rgba(255,255,255,0.08)'; roundRect(ctx, x, y, wd, h, 12); ctx.fill();
-        ctx.fillStyle = '#3ddc84'; roundRect(ctx, x, y, Math.max(8, wd * F / 0.03), h, 12); ctx.fill();
-        ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x + wd / 2, y - 6); ctx.lineTo(x + wd / 2, y + h + 6); ctx.stroke();
-        ctx.fillStyle = '#ffd34d'; ctx.font = '700 24px system-ui'; ctx.textAlign = 'center'; ctx.fillText('half', x + wd / 2, y + h + 30); ctx.textAlign = 'left';
+        ctx.fillStyle = '#3ddc84'; roundRect(ctx, x, y, Math.max(8, wd * F / Fmax), h, 12); ctx.fill();
+        ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x + wd * mk, y - 6); ctx.lineTo(x + wd * mk, y + h + 6); ctx.stroke();
+        ctx.fillStyle = '#ffd34d'; ctx.font = '700 24px system-ui'; ctx.textAlign = 'center'; ctx.fillText(L.mark, x + wd * mk, y + h + 30); ctx.textAlign = 'left';
         return y + h + 40;
       } },
-      { t: 'Biggest force (θ = 90°) = 0.0300 N', size: 29, color: '#9fb6cc' },
+      { t: `Biggest force (θ = 90°) = ${Fmax.toFixed(4)} N`, size: 29, color: '#9fb6cc' },
     ], { title: 'Force meter' });
     return;
   }
@@ -700,10 +751,10 @@ m1.updateB = function () {
 m1.lockAngle = async function () {
   if (this.phase !== 'angle') return;
   this.angleTries++;
-  const th = this.angle.value;
-  if (th === 30) {
+  const L = lvl(this), th = this.angle.value, Fmax = this.Fmax(), F = Fmax * Math.sin(th * Math.PI / 180);
+  if (Math.abs(F - L.target) <= L.tol) {
     this.phase = 'angleDone'; hint.hide();
-    sfx.good(); toast('Yes: sin 30° = 0.5, so F = 0.015 N, half of 0.030 N.', 'good', 3);
+    sfx.good(); toast(`Yes: sin ${th}° = ${Math.sin(th * Math.PI / 180).toFixed(3)}, so F = ${F.toFixed(4)} N.`, 'good', 3);
     celebrate(this.wire.getWorldPosition(new V3()), { stars: 0 });
     this.angle.setEnabled(); this.lockBtn.userData.setOn(false);
     await wait(3);
@@ -711,9 +762,8 @@ m1.lockAngle = async function () {
     this.questions();
   } else {
     sfx.bad();
-    const f = Math.sin(th * Math.PI / 180);
-    this.angleMsg = `At ${th}° the force is ${(f * 100).toFixed(0)}% of the biggest. You need sin θ = 0.5.`;
-    toast('Not half yet', 'bad', 2);
+    this.angleMsg = `At ${th}° the force is ${F.toFixed(4)} N, ${(F / Fmax * 100).toFixed(0)}% of the biggest. ${this.angleTries >= 2 ? `You need sin θ = F / BIL = ${(L.target / Fmax).toFixed(3)}.` : 'Use F = BIL sin θ to find the angle.'}`;
+    toast('Not the right force yet', 'bad', 2);
     this.redraw();
   }
 };
@@ -722,20 +772,15 @@ m1.questions = async function () {
   this.controls.visible = false;
   const go = askIf(this);
   let ok = 0;
-  ok += await go({ title: 'Question 1 of 2', q: 'A wire 5.0 cm long carries 3.0 A at right angles to a field of 0.20 T. What is the force on it?',
-    options: ['3.0 N', '0.030 N', '0.015 N', '0.0030 N'], correct: 1,
-    explain: 'F = BIL = 0.20 × 3.0 × 0.050 = 0.030 N.',
-    why: ['That uses L = 5.0. Convert to metres: L = 0.050 m.', '', 'That includes sin 30°. Here the wire is at 90° to the field, so sin θ = 1.', 'Check the arithmetic: 0.20 × 3.0 = 0.60, then × 0.050.'] }) ? 1 : 0;
-  if (current !== this) return;
-  ok += await go({ title: 'Question 2 of 2', q: 'The wire is turned until it lies along the field lines (θ = 0). What happens to the force?',
-    options: ['It is at its biggest', 'It reverses', 'It becomes zero', 'It halves'], correct: 2,
-    explain: 'sin 0° = 0, so F = BIL sin θ = 0. A current along the field feels no force.',
-    why: ['The biggest force is at 90°, when the wire is at right angles to the field.', 'Reversing needs the current or the field reversed.', '', 'Half the force is at θ = 30°.'] }) ? 1 : 0;
-  if (current !== this) return;
+  for (const [k, q] of M1_QUESTIONS[this.lv].entries()) {
+    ok += await go({ title: `Question ${k + 1} of 2`, ...q }) ? 1 : 0;
+    if (current !== this) return;
+  }
   this.phase = 'done';
   this.powerOn(false);
+  const max = this.rounds.length + 2;
   const score = this.right + ok - (this.hints > 1 ? 1 : 0) - (this.angleTries > 2 ? 1 : 0);
-  const n = score >= 5 ? 3 : score >= 3 ? 2 : 1;
+  const n = score >= max - 1 ? 3 : score >= max - 3 ? 2 : 1;
   finishMission(this, n, [
     { t: `Predictions right: ${this.right} of ${this.rounds.length}. Questions right first time: ${ok} of 2.`, size: 30 },
     { t: 'Key ideas', size: 32, bold: true, color: '#ffd34d' },
@@ -743,6 +788,34 @@ m1.questions = async function () {
     { t: '• F = BIL sin θ: biggest at 90°, zero when the current is along the field.', size: 30 },
   ]);
 };
+const M1_QUESTIONS = [[
+  { q: 'A wire 5.0 cm long carries 3.0 A at right angles to a field of 0.20 T. What is the force on it?',
+    options: ['3.0 N', '0.030 N', '0.015 N', '0.0030 N'], correct: 1,
+    explain: 'F = BIL = 0.20 × 3.0 × 0.050 = 0.030 N.',
+    why: ['That uses L = 5.0. Convert to metres: L = 0.050 m.', '', 'That includes sin 30°. Here the wire is at 90° to the field, so sin θ = 1.', 'Check the arithmetic: 0.20 × 3.0 = 0.60, then × 0.050.'] },
+  { q: 'The wire is turned until it lies along the field lines (θ = 0). What happens to the force?',
+    options: ['It is at its biggest', 'It reverses', 'It becomes zero', 'It halves'], correct: 2,
+    explain: 'sin 0° = 0, so F = BIL sin θ = 0. A current along the field feels no force.',
+    why: ['The biggest force is at 90°, when the wire is at right angles to the field.', 'Reversing needs the current or the field reversed.', '', 'Half the force is at θ = 30°.'] },
+], [
+  { q: 'One side of the pump motor\'s coil is 8.0 cm long and carries 2.5 A at right angles to a 0.30 T field. What is the force on it?',
+    options: ['0.060 N', '6.0 N', '0.030 N', '0.60 N'], correct: 0,
+    explain: 'F = BIL = 0.30 × 2.5 × 0.080 = 0.060 N.',
+    why: ['', 'Convert the length to metres: L = 0.080 m.', 'That is half the answer: sin 90° = 1, not 0.5.', 'Check the powers of ten: 0.30 × 2.5 = 0.75, then × 0.080.'] },
+  { q: 'Both the current AND the magnetic field are reversed. What happens to the force on the wire?',
+    options: ['It acts in the same direction as before', 'It reverses', 'It becomes zero', 'It doubles'], correct: 0,
+    explain: 'Reversing one of them reverses the force. Reversing both reverses it twice, so it ends up the same.',
+    why: ['', 'That is what happens if only ONE of them is reversed.', 'There is still a current across a field, so there is still a force.', 'The sizes of B and I have not changed.'] },
+], [
+  { q: 'The fan motor (B = 0.15 T, L = 0.060 m) must give 0.025 N. What current would give that force with the wire at 90° to the field?',
+    options: ['2.8 A', '4.0 A', '1.9 A', '5.8 A'], correct: 0,
+    explain: 'I = F / BL = 0.025 / (0.15 × 0.060) = 2.8 A. At 90° every bit of current counts, so less is needed than at 44°.',
+    why: ['', 'That is the current at 44°. At 90°, sin θ = 1, so less current gives the same force.', 'That multiplies by sin 44°. At 90° there is no sin factor to include.', 'That divides 4.0 A by sin 44°: that would make the force bigger, not the same.'] },
+  { q: 'A horizontal wire carries a current due north in a magnetic field pointing vertically DOWNWARDS. Which way is the force on the wire?',
+    options: ['East', 'West', 'Up', 'North'], correct: 1,
+    explain: 'Left hand: First finger down (field), seCond finger north (current): your thuMb points west.',
+    why: ['That is the right-hand answer. Motors use the LEFT hand.', '', 'The force is at right angles to the field, and the field is vertical.', 'The force is at right angles to the current as well.'] },
+]];
 const _p1 = new V3();
 m1.tick = function (dt, t) {
   // field: dots flow from N to S along each field line
@@ -770,6 +843,22 @@ const P_ROUNDS = [
   { name: 'alpha particle', q: 2 * E_CH, m: 6.64e-27, v: 1.5e6, d: 0.40, color: 0xffc14d, unit: 'T', label: 'α²⁺' },
 ];
 const m2 = { title: 'Experiment 2: Particle Paths', short: 'Particle Paths', controls: new THREE.Group(), world: new THREE.Group(), scale0: 1 };
+m2.levels = [
+  { name: 'Proton, Electron, Alpha', particles: P_ROUNDS, perfect: 4,
+    brief: 'Radiation monitors work by steering charged particles onto a detector. Here are the three you will meet most. Set the field so each one lands on the detector.',
+    debrief: 'Three for three. Mass, charge and speed all change the circle, and the charge\'s sign changes the way it turns.' },
+  { name: 'Isotope Beams', perfect: 4, particles: [
+    { name: 'deuteron', q: E_CH, m: 3.34e-27, v: 2.0e6, d: 0.36, color: 0xff9a5a, unit: 'T', label: 'd⁺ (²H nucleus)' },
+    { name: 'positron', q: E_CH, m: 9.11e-31, v: 2.0e7, d: 0.32, color: 0xff6ad5, unit: 'mT', label: 'e⁺' },
+    { name: 'helion', q: 2 * E_CH, m: 5.01e-27, v: 1.2e6, d: 0.28, color: 0x9be15d, unit: 'T', label: '³He²⁺' }],
+    brief: 'The X-ray room\'s new monitor must also catch heavier and stranger particles: a deuteron, a positron (antimatter!) and a helium-3 nucleus. Same job: land each one on the detector.',
+    debrief: 'The monitor is calibrated for all three. Notice the positron curves like a proton, but on a circle as small as an electron\'s.' },
+  { name: 'Mystery Particles', perfect: 5, mystery: true, particles: [
+    { name: 'particle X', reveal: 'a muon', q: -E_CH, m: 1.88e-28, v: 1.0e7, d: 0.30, color: 0x5ae0ff, unit: 'T', label: 'X' },
+    { name: 'particle Y', reveal: 'a lithium-7 ion (Li⁺)', q: E_CH, m: 1.162e-26, v: 6.0e5, d: 0.34, color: 0xffd34d, unit: 'T', label: 'Y' }],
+    brief: 'Two unknown particles turned up in our detector logs. We know their speeds and the size of their charge, but not their masses. Fire, measure the radius, work out the mass, then hit the detector.',
+    debrief: 'X is a muon, a heavy cousin of the electron that rains down from cosmic rays. Y is a lithium ion. You just did real particle physics.' },
+];
 missions.push(m2);
 panel.add(m2.controls); app.add(m2.world);
 m2.world.position.set(0, 0.15, -0.1);
@@ -843,7 +932,7 @@ m2.world.position.set(0, 0.15, -0.1);
 }
 m2.enter = function () {
   this.round = 0; this.shots = 0; this.hints = 0;
-  this.rounds = P_ROUNDS.map((r) => ({ ...r, side: Math.random() < 0.5 ? 1 : -1 }));
+  this.rounds = lvl(this).particles.map((r) => ({ ...r, side: Math.random() < 0.5 ? 1 : -1 }));
   this.setRound();
 };
 m2.dial = function () { return this.R.unit === 'mT' ? this.dialmT : this.dialT; };
@@ -946,19 +1035,23 @@ m2.judge = async function (P) {
   else if (P.s !== R.side) text = `It curved the wrong way. ${carrier} Reverse the field.`;
   else if (P.end === 'far') text = `The path radius r = mv/Bq = ${(P.r * 100).toFixed(1)} cm is too big, so it hit the far wall. A stronger field gives a smaller circle.`;
   else if (!rightWay) text = `It curved the wrong way. ${carrier} Reverse the field.`;
-  else if (Math.abs(landed - R.d) <= 0.012) { ok = true; text = `Hit! r = mv/Bq = ${(P.r * 100).toFixed(1)} cm, so it lands 2r = ${(2 * P.r * 100).toFixed(1)} cm from the gun.`; }
+  else if (Math.abs(landed - R.d) <= 0.012) {
+    ok = true; text = `Hit! r = mv/Bq = ${(P.r * 100).toFixed(1)} cm, so it lands 2r = ${(2 * P.r * 100).toFixed(1)} cm from the gun.`;
+    if (R.reveal) text += ` Its mass m = Bqr/v = ${sig(R.m)} kg: ${R.name} is ${R.reveal}.`;
+  }
   else text = `It landed ${(landed * 100).toFixed(1)} cm from the gun (r = ${(P.r * 100).toFixed(1)} cm). The detector is ${(R.d * 100).toFixed(0)} cm away, so r must be ${(need * 100).toFixed(0)} cm. ${landed > R.d ? 'Make the field stronger.' : 'Make the field weaker.'}`;
   this.result = { ok, text };
   if (ok) {
-    sfx.great(); toast(`Hit the detector with the ${R.name}!`, 'good', 2.5);
+    sfx.great(); toast(R.reveal ? `Hit! ${R.name} is ${R.reveal}` : `Hit the detector with the ${R.name}!`, 'good', 2.5);
     this.target.updateWorldMatrix(true, true);
     const tp = this.target.getWorldPosition(new V3());
     celebrate(tp, { stars: 0 }); shockwave(tp, { color: 0x3ddc84, size: 0.2, normal: new V3(1, 0, 0) });
   } else { sfx.bad(); toast('Missed the detector', 'bad', 2); }
+  if (ok) this.phase = 'hit';
   this.redraw(); this.drawData();
   if (ok) {
     this.phase = 'hit';
-    await wait(3.2);
+    await wait(R.reveal ? 4.5 : 3.2);
     if (current !== this) return;
     this.round++;
     if (this.round < this.rounds.length) this.setRound(); else this.questions();
@@ -971,26 +1064,32 @@ m2.judge = async function (P) {
 m2.redraw = function () {
   if (Q.active || this.phase === 'done' || this.phase === 'quiz') return;
   const R = this.R;
-  const hints = [
+  const hints = (R.reveal ? [
+    'Hint 1: you cannot calculate B yet, because the mass is unknown. Fire once with any field and read the radius r on the beam data board.',
+    'Hint 2: Bqv = mv²/r, so m = Bqr/v. Use the field and radius from that shot. If it curved the wrong way, the charge is the other sign.',
+    `Hint 3: now B = mv/(qr) with r = ${(R.d * 50).toFixed(0)} cm = ${(R.d / 2).toFixed(2)} m.`,
+  ] : [
     'Hint 1: the magnetic force Bqv is the centripetal force: Bqv = mv²/r, so r = mv/Bq.',
     `Hint 2: it turns through a semicircle, so it lands 2r from the gun: r = ${(R.d * 50).toFixed(0)} cm = ${(R.d / 2).toFixed(2)} m.`,
-    `Hint 3: B = mv/(qr). For the direction use the left-hand rule (${R.q < 0 ? 'the current is opposite to an electron\'s motion' : 'the current is along the motion'}).`,
-  ].slice(0, this.hints);
+    `Hint 3: B = mv/(qr). For the direction use the left-hand rule (${R.q < 0 ? 'the current is opposite to a negative particle\'s motion' : 'the current is along the motion'}).`,
+  ]).slice(0, this.hints);
   info.userData.draw([
-    { t: `Round ${this.round + 1} of 3: ${R.name}`, size: 36, bold: true, color: '#ffd34d' },
+    this.round === 0 && this.shots === 0 && brief(this),
+    { t: `Round ${this.round + 1} of ${this.rounds.length}: ${R.name}`, size: 36, bold: true, color: '#ffd34d' },
     { t: 'A beam enters a vacuum chamber travelling to the right. Coils above and below make a vertical magnetic field.', size: 30, gap: 8 },
     { t: `Set the field (strength on the dial, and up or down) so the ${R.name} lands on the green detector ${(R.d * 100).toFixed(0)} cm from the gun. Then FIRE.`, size: 30, color: '#ffd34d', gap: 8 },
+    R.reveal && { t: 'Its mass is unknown, and so is the sign of its charge. Use a test shot to measure them.', size: 28, color: '#ffb347', gap: 6 },
     ...hints.map((t) => ({ t, size: 27, color: '#e0b3ff', gap: 4 })),
     this.result && { rule: true },
     this.result && { t: this.result.text, size: 28, color: this.result.ok ? '#8ef0a8' : '#ffb3a3' },
-  ], { title: this.title });
+  ], { title: heading(this) });
 };
 m2.drawData = function () {
-  const R = this.R;
+  const R = this.R, secret = R.reveal && this.phase !== 'hit';
   data.userData.draw([
-    { t: `Particle: ${R.name} (${R.label})`, size: 34, bold: true, color: cssOf(R.color) },
-    { t: `charge q = ${R.q < 0 ? '−' : '+'}${sig(Math.abs(R.q))} C`, size: 30 },
-    { t: `mass m = ${sig(R.m)} kg`, size: 30 },
+    { t: `Particle: ${R.name}${R.reveal ? '' : ` (${R.label})`}`, size: 34, bold: true, color: cssOf(R.color) },
+    { t: secret ? `charge q = ±${sig(Math.abs(R.q))} C (sign unknown)` : `charge q = ${R.q < 0 ? '−' : '+'}${sig(Math.abs(R.q))} C`, size: 30 },
+    { t: secret ? 'mass m = ? (find it)' : `mass m = ${sig(R.m)} kg`, size: 30, color: secret ? '#ffb347' : undefined },
     { t: `speed v = ${sig(R.v)} m/s`, size: 30 },
     { t: `gun to detector = ${(R.d * 100).toFixed(0)} cm`, size: 30 },
     { rule: true },
@@ -1004,25 +1103,48 @@ m2.questions = async function () {
   this.controls.visible = false;
   const go = askIf(this);
   let ok = 0;
-  ok += await go({ title: 'Question 1 of 2', q: 'An electron and a proton enter the same field at the same speed. Compared with the proton\'s path, the electron\'s path…',
-    options: ['is a much smaller circle, curving the opposite way', 'is a bigger circle, curving the same way', 'is the same size, curving the opposite way', 'is a straight line'], correct: 0,
-    explain: 'r = mv/Bq: the electron\'s mass is about 1/1840 of the proton\'s, so its circle is far smaller. Its charge is negative, so it curves the other way.',
-    why: ['', 'r = mv/Bq, and the electron is much LESS massive.', 'Same size would need equal mass. The electron is about 1840 times lighter.', 'A moving charge crossing a field always feels a force.'] }) ? 1 : 0;
-  if (current !== this) return;
-  ok += await go({ title: 'Question 2 of 2', q: 'Why does the particle keep the same speed all the way round its circle?',
-    options: ['The field is uniform', 'The magnetic force is always at right angles to the velocity, so it does no work', 'There is no air in the chamber', 'The charge is very small'], correct: 1,
-    explain: 'F = Bqv is perpendicular to v, so it changes direction only. No work is done and the kinetic energy stays constant.',
-    why: ['A uniform field explains the constant radius, not why the speed stays the same.', '', 'A vacuum removes collisions, but the reason here is the direction of the force.', 'Even a small charge would be sped up by a force along its motion.'] }) ? 1 : 0;
-  if (current !== this) return;
+  for (const [k, q] of M2_QUESTIONS[this.lv].entries()) {
+    ok += await go({ title: `Question ${k + 1} of 2`, ...q }) ? 1 : 0;
+    if (current !== this) return;
+  }
   this.phase = 'done';
-  const n = this.shots <= 4 && this.hints === 0 ? 3 : this.shots <= 7 ? 2 : 1;
+  const best = lvl(this).perfect;
+  const n = this.shots <= best && this.hints === 0 ? 3 : this.shots <= best + 3 ? 2 : 1;
   finishMission(this, n, [
-    { t: `Shots: ${this.shots} (3 is perfect).  Hints: ${this.hints}.  Questions right first time: ${ok} of 2.`, size: 30 },
+    { t: `Shots: ${this.shots} (${best} or fewer for 3 stars).  Hints: ${this.hints}.  Questions right first time: ${ok} of 2.`, size: 30 },
     { t: 'Key ideas', size: 32, bold: true, color: '#ffd34d' },
     { t: '• F = Bqv acts at right angles to the motion, so charged particles move in circles: Bqv = mv²/r gives r = mv/Bq.', size: 30 },
-    { t: '• Negative charges curve the opposite way to positive ones.', size: 30 },
+    { t: this.lv === 2 ? '• Measure r in a known field and you can find the mass: m = Bqr/v.' : '• Negative charges curve the opposite way to positive ones.', size: 30 },
   ]);
 };
+const M2_QUESTIONS = [[
+  { q: 'An electron and a proton enter the same field at the same speed. Compared with the proton\'s path, the electron\'s path…',
+    options: ['is a much smaller circle, curving the opposite way', 'is a bigger circle, curving the same way', 'is the same size, curving the opposite way', 'is a straight line'], correct: 0,
+    explain: 'r = mv/Bq: the electron\'s mass is about 1/1840 of the proton\'s, so its circle is far smaller. Its charge is negative, so it curves the other way.',
+    why: ['', 'r = mv/Bq, and the electron is much LESS massive.', 'Same size would need equal mass. The electron is about 1840 times lighter.', 'A moving charge crossing a field always feels a force.'] },
+  { q: 'Why does the particle keep the same speed all the way round its circle?',
+    options: ['The field is uniform', 'The magnetic force is always at right angles to the velocity, so it does no work', 'There is no air in the chamber', 'The charge is very small'], correct: 1,
+    explain: 'F = Bqv is perpendicular to v, so it changes direction only. No work is done and the kinetic energy stays constant.',
+    why: ['A uniform field explains the constant radius, not why the speed stays the same.', '', 'A vacuum removes collisions, but the reason here is the direction of the force.', 'Even a small charge would be sped up by a force along its motion.'] },
+], [
+  { q: 'A deuteron (charge +e, about twice the proton\'s mass) and a proton enter the same field at the same speed. The deuteron\'s circle has…',
+    options: ['twice the radius', 'half the radius', 'the same radius', 'four times the radius'], correct: 0,
+    explain: 'r = mv/Bq. Same q, v and B, so r ∝ m: twice the mass gives twice the radius.',
+    why: ['', 'A heavier particle is harder to turn, so its circle is bigger, not smaller.', 'The charges are equal but the masses are not.', 'r is proportional to m, not to m².'] },
+  { q: 'A positron has the same mass as an electron but a positive charge. At the same speed in the same field, compared with an electron it…',
+    options: ['curves the opposite way on a circle of the same size', 'curves the same way on a bigger circle', 'goes straight on', 'curves the opposite way on a much bigger circle'], correct: 0,
+    explain: 'Same m, v and size of q gives the same r = mv/Bq. The opposite charge reverses the force, so it curves the other way.',
+    why: ['', 'Its charge is opposite, so the force is reversed.', 'It is charged and moving across the field, so there is a force.', 'Its mass equals the electron\'s, so the radius is the same.'] },
+], [
+  { q: 'Particle X has charge −1.60 × 10⁻¹⁹ C and mass 1.88 × 10⁻²⁸ kg, about 207 electron masses. What is it?',
+    options: ['A muon', 'An electron', 'A proton', 'An alpha particle'], correct: 0,
+    explain: 'A negative particle about 207 times heavier than an electron is a muon. Muons come from cosmic rays hitting the upper atmosphere.',
+    why: ['', 'An electron is 9.11 × 10⁻³¹ kg: about 200 times lighter than X.', 'A proton is positive and about 9 times heavier than X.', 'An alpha particle is positive, with charge +2e.'] },
+  { q: 'Particle Y (charge +e) has mass 1.16 × 10⁻²⁶ kg. How many atomic mass units is that, and what ion is it? (1 u = 1.66 × 10⁻²⁷ kg)',
+    options: ['7 u: a lithium-7 ion', '12 u: a carbon-12 ion', '4 u: a helium-4 ion', '1 u: a proton'], correct: 0,
+    explain: '1.16 × 10⁻²⁶ / 1.66 × 10⁻²⁷ = 7.0 u. Lithium-7 with one electron removed is Li⁺.',
+    why: ['', 'Divide by 1.66 × 10⁻²⁷ kg: it comes to 7, not 12.', 'Check the division: 4 u would be 6.6 × 10⁻²⁷ kg.', 'A proton is 1.67 × 10⁻²⁷ kg, seven times lighter.'] },
+]];
 m2.tick = function (dt, t) {
   const B = this.R ? this.Bvalue() : 0, s = Math.sign(B);
   for (const c of this.coilChevrons) {
@@ -1042,6 +1164,19 @@ const SEL_X0 = -0.42, SEL_X1 = -0.2, SLIT_X = -0.18, ENTRY_X = -0.17;
 const ISOTOPES = [{ A: 20, w: 0.6, color: 0xff7b54 }, { A: 21, w: 0.15, color: 0xffd34d }, { A: 22, w: 0.25, color: 0x6fd3ff }];
 const N_IONS = 240;
 const m3 = { title: 'Experiment 3: Mass Spectrometer', short: 'Mass Spectrometer', controls: new THREE.Group(), world: new THREE.Group(), scale0: 1.3 };
+m3.levels = [
+  { name: 'Neon Lines', ion: 'neon', src: 'neon ion source', iso: ISOTOPES, vSel: V_SEL, vText: '2.0 × 10⁵ m/s', eText: '2.0 × 10⁴ V/m',
+    brief: 'Our spectrometer is new, so we calibrate it with neon, which has three well-known isotopes. Pick out one ion speed, then measure where each isotope lands.',
+    debrief: 'Calibrated. The machine weighs atoms correctly, so we can trust it with real samples.' },
+  { name: 'Chlorine Check', ion: 'chlorine', src: 'chlorine ion source', vSel: 1.2e5, vText: '1.2 × 10⁵ m/s', eText: '1.2 × 10⁴ V/m',
+    iso: [{ A: 35, w: 0.75, color: 0x9be15d }, { A: 37, w: 0.25, color: 0xff7bd0 }],
+    brief: 'The clinic will clean its water with chlorine. Check the supplier\'s sample: select ions at 1.2 × 10⁵ m/s this time, then measure every line.',
+    debrief: 'Two isotopes, three to one. That is why chlorine\'s relative atomic mass is 35.5 and not a whole number.' },
+  { name: 'Unknown Sample', ion: 'unknown metal', src: 'borehole sample', vSel: 1.6e5, vText: '1.6 × 10⁵ m/s', eText: '1.6 × 10⁴ V/m',
+    iso: [{ A: 24, w: 0.79, color: 0xff7b54 }, { A: 25, w: 0.10, color: 0xffd34d }, { A: 26, w: 0.11, color: 0x6fd3ff }],
+    brief: 'Water from the new borehole has a metal dissolved in it. Select ions at 1.6 × 10⁵ m/s, measure every line, and then tell me what the metal is.',
+    debrief: 'Magnesium: harmless, and even good for you. The borehole is safe to use.' },
+];
 missions.push(m3);
 panel.add(m3.controls); app.add(m3.world);
 m3.world.position.set(0.14, 0.063, 0.06);
@@ -1051,7 +1186,7 @@ m3.world.position.set(0.14, 0.063, 0.06);
   W.add(noHit(mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), steel, -0.5, 0, 0)));
   W.add(noHit(mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.03, 12).rotateZ(Math.PI / 2), steel, -0.455, 0, 0)));
   m3.srcGlow = glowSprite(0xff9a5a, 0.08, 0.6); m3.srcGlow.position.set(-0.44, 0, 0); W.add(m3.srcGlow);
-  const srcLabel = textSprite('neon ion source', { size: 0.026 }); srcLabel.position.set(-0.5, 0.075, 0); W.add(srcLabel);
+  m3.srcLabel = textSprite('neon ion source', { size: 0.026 }); m3.srcLabel.position.set(-0.5, 0.075, 0); W.add(m3.srcLabel);
   // velocity selector: + plate at −z, − plate at +z, magnetic field B1 downwards
   m3.plateMatP = mat(0xd64541, { metalness: 0.5, roughness: 0.35, emissive: 0xff3020, emissiveIntensity: 0 });
   m3.plateMatN = mat(0x2f6fd6, { metalness: 0.5, roughness: 0.35, emissive: 0x2050ff, emissiveIntensity: 0 });
@@ -1106,14 +1241,13 @@ m3.world.position.set(0.14, 0.063, 0.06);
     W.add(a); m3.b1Arrows.push(a);
   }
   m3.ions = dotPool(N_IONS, 0.0045, W, { additive: false });
-  m3.spots = ISOTOPES.map((iso) => {
+  // one detector line per isotope (placed for each level in setLevel)
+  m3.spots = [0, 1, 2].map(() => {
     const g = new THREE.Group();
-    const r = iso.A * U * V_SEL / (E_CH * B2);
-    g.position.set(ENTRY_X - 0.0095, 0, -2 * r);
-    const bar = mesh(new THREE.BoxGeometry(0.004, 0.05, 0.006), new THREE.MeshBasicMaterial({ color: iso.color, transparent: true, opacity: 0, toneMapped: false }));
-    const glow = glowSprite(iso.color, 0.06, 0);
+    const bar = mesh(new THREE.BoxGeometry(0.004, 0.05, 0.006), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, toneMapped: false }));
+    const glow = glowSprite(0xffffff, 0.06, 0);
     g.add(bar, glow); noHit(g);
-    g.userData = { d: 2 * r, bar, glow };
+    g.userData = { d: 0, bar, glow };
     W.add(g);
     return g;
   });
@@ -1143,9 +1277,24 @@ m3.world.position.set(0.14, 0.063, 0.06);
   m3.recordBtn.position.set(-0.2, -0.07, 0);
   m3.controls.add(m3.dial.group, m3.checkBtn, m3.markSlider.group, m3.recordBtn);
 }
+m3.setLevel = function (l) {
+  const L = this.levels[l];
+  this.iso = L.iso; this.vSel = L.vSel;
+  this.srcLabel.userData.set(L.src);
+  this.spots.forEach((g, i) => {
+    const iso = this.iso[i];
+    g.visible = !!iso;
+    if (!iso) return;
+    const r = iso.A * U * this.vSel / (E_CH * B2);
+    g.position.set(ENTRY_X - 0.0095, 0, -2 * r);
+    g.userData.d = 2 * r;
+    g.userData.bar.material.color.set(iso.color); g.userData.glow.material.color.set(iso.color);
+  });
+};
+m3.setLevel(0);
 m3.enter = function () {
   this.phase = 'select'; this.checks = 0; this.stageB = false; this.result = null; this.misses = 0;
-  this.ionList = []; this.spawnT = 0; this.passed = []; this.hitCount = [0, 0, 0]; this.recorded = [null, null, null];
+  this.ionList = []; this.spawnT = 0; this.passed = []; this.hitCount = this.iso.map(() => 0); this.recorded = this.iso.map(() => null);
   this.ions.hideAll();
   this.spots.forEach((s) => { s.userData.bar.material.opacity = 0; s.userData.glow.material.opacity = 0; });
   this.dial.set(300, true); this.dial.setEnabled();
@@ -1167,26 +1316,29 @@ m3.updatePlates = function () {
 m3.redraw = function () {
   if (Q.active || this.phase === 'done' || this.phase === 'quiz') return;
   const w = words();
+  const L = lvl(this);
   if (!this.stageB) {
     info.userData.draw([
+      this.checks === 0 && brief(this),
       { t: 'Stage 1: the velocity selector', size: 36, bold: true, color: '#ffd34d' },
-      { t: 'Neon ions (+1 charge) leave the source at many speeds. Between the plates the electric force qE pushes one way and the magnetic force Bqv the other.', size: 29, gap: 8 },
-      { t: 'Turn the voltage dial so only ions with v = 2.0 × 10⁵ m/s go straight through the slit. Then press Check speed.', size: 30, color: '#ffd34d', gap: 8 },
+      { t: `${L.ion[0].toUpperCase() + L.ion.slice(1)} ions (+1 charge) leave the source at many speeds. Between the plates the electric force qE pushes one way and the magnetic force Bqv the other.`, size: 29, gap: 8 },
+      { t: `Turn the voltage dial so only ions with v = ${L.vText} go straight through the slit. Then press Check speed.`, size: 30, color: '#ffd34d', gap: 8 },
       { t: 'B₁ = 0.10 T,  plate gap d = 4.0 cm.  Use qE = Bqv and E = V/d.', size: 28, color: '#cfe3ff' },
       { t: 'Ion colour shows speed: red is slow, blue is fast.', size: 26, color: '#9fb6cc' },
       this.result && { rule: true },
       this.result && { t: this.result, size: 28, color: '#ffb3a3' },
-    ], { title: this.title });
+    ], { title: heading(this) });
   } else {
     const done = this.recorded.filter((x) => x != null).length;
+    const nLines = this.iso.length;
     info.userData.draw([
       { t: 'Stage 2: weighing the ions', size: 36, bold: true, color: '#ffd34d' },
-      { t: 'Ions at 2.0 × 10⁵ m/s enter field B₂ = 0.20 T, travel a semicircle and land a distance 2r from the slit. Neon has three isotopes, so three lines build up.', size: 29, gap: 8 },
+      { t: `Ions at ${L.vText} enter field B₂ = 0.20 T, travel a semicircle and land a distance 2r from the slit. Each isotope makes its own line${this.lv === 0 ? ': neon has three' : ''}.`, size: 29, gap: 8 },
       { t: `Measure each line: ${dragWord()} the red marker along the ruler (or use the Marker slider) until it sits on a line, then Record spot.`, size: 30, color: '#ffd34d', gap: 8 },
-      { t: `Lines measured: ${done} of 3`, size: 30, color: '#cfe3ff' },
+      { t: `Lines measured: ${done} of ${nLines}`, size: 30, color: '#cfe3ff' },
       this.result && { rule: true },
       this.result && { t: this.result, size: 28, color: '#ffb3a3' },
-    ], { title: this.title });
+    ], { title: heading(this) });
   }
 };
 m3.drawData = function () {
@@ -1200,8 +1352,9 @@ m3.drawData = function () {
   if (this.stageB) {
     lines.push({ rule: true }, { t: 'Detector counts', size: 30, bold: true, color: '#ffd34d' }, { fn: (ctx, x, y, wd) => {
       const h = 150, max = Math.max(10, ...this.hitCount);
-      ISOTOPES.forEach((iso, i) => {
-        const bx = x + 40 + i * (wd - 80) / 3, bw = (wd - 80) / 3 - 40, bh = h * this.hitCount[i] / max;
+      const nb = this.iso.length;
+      this.iso.forEach((iso, i) => {
+        const bx = x + 40 + i * (wd - 80) / nb, bw = (wd - 80) / nb - 40, bh = h * this.hitCount[i] / max;
         ctx.fillStyle = cssOf(iso.color); roundRect(ctx, bx, y + h - bh, bw, Math.max(2, bh), 8); ctx.fill();
         ctx.fillStyle = '#cfe3ff'; ctx.font = '700 24px system-ui'; ctx.textAlign = 'center';
         const rec = this.recorded[i];
@@ -1218,10 +1371,10 @@ m3.drawData = function () {
 m3.check = async function () {
   if (this.phase !== 'select') return;
   this.checks++;
-  const V = this.dial.value, vSel = this.E() / B1;
-  if (Math.abs(V - 800) <= 8) {
+  const L = lvl(this), V = this.dial.value, vSel = this.E() / B1, Vneed = this.vSel * B1 * PLATE_GAP;
+  if (Math.abs(V - Vneed) <= 8) {
     this.phase = 'stageB'; this.result = null; hint.hide();
-    sfx.good(); toast('Correct: E = 2.0 × 10⁴ V/m, and E/B = 2.0 × 10⁵ m/s.', 'good', 3.5);
+    sfx.good(); toast(`Correct: E = ${L.eText}, and E/B = ${L.vText}.`, 'good', 3.5);
     this.dial.setEnabled(); this.checkBtn.userData.setOn(false);
     await wait(2);
     if (current !== this) return;
@@ -1239,7 +1392,7 @@ m3.check = async function () {
     this.redraw();
   } else {
     sfx.bad();
-    this.result = `At ${V.toFixed(0)} V the ions that pass have v = E/B = ${sig(vSel)} m/s. You need 2.0 × 10⁵ m/s: E = vB = 2.0 × 10⁴ V/m, then V = Ed.`;
+    this.result = `At ${V.toFixed(0)} V the ions that pass have v = E/B = ${sig(vSel)} m/s. You need ${L.vText}: E = vB = ${L.eText}, then V = Ed.`;
     toast('Not that speed. Read the board.', 'bad', 2.5);
     this.redraw();
   }
@@ -1253,13 +1406,13 @@ m3.record = function () {
   if (this.phase !== 'measure') return;
   const d = this.markSlider.value;
   let best = -1, bestErr = 1e9;
-  this.spots.forEach((s, i) => { const e = Math.abs(s.userData.d * 100 - d); if (e < bestErr && this.hitCount[i] > 3) { bestErr = e; best = i; } });
+  this.iso.forEach((_, i) => { const e = Math.abs(this.spots[i].userData.d * 100 - d); if (e < bestErr && this.hitCount[i] > 3) { bestErr = e; best = i; } });
   if (best >= 0 && bestErr <= 0.3) {
     if (this.recorded[best] != null) { toast('You have measured that line already.', 'info', 2); return; }
     this.recorded[best] = d; this.result = null;
     sfx.good(); toast(`Recorded: line at ${d.toFixed(1)} cm`, 'good', 2);
     this.spots[best].updateWorldMatrix(true, true);
-    shockwave(this.spots[best].getWorldPosition(new V3()), { color: ISOTOPES[best].color, size: 0.1 });
+    shockwave(this.spots[best].getWorldPosition(new V3()), { color: this.iso[best].color, size: 0.1 });
     this.redraw(); this.drawData();
     if (this.recorded.every((x) => x != null)) { this.phase = 'quiz'; hint.hide(); this.markSlider.setEnabled(); this.recordBtn.userData.setOn(false); wait(2.5).then(() => current === this && this.questions()); }
   } else {
@@ -1275,6 +1428,14 @@ m3.questions = async function () {
   const go = askIf(this);
   let ok = 0;
   const d = this.spots.map((s) => (s.userData.d * 100).toFixed(1));
+  const set = this.lv === 0 ? null : M3_QUESTIONS[this.lv](d, this.spots.map((s) => s.userData.d));
+  if (set) {
+    for (const [k, q] of set.entries()) {
+      ok += await go({ title: `Question ${k + 1} of 3`, ...q }) ? 1 : 0;
+      if (current !== this) return;
+    }
+    return this.finish(ok);
+  }
   ok += await go({ title: 'Question 1 of 3', q: 'Which line is made by neon-22, the heaviest isotope?',
     options: [`The nearest (${d[0]} cm)`, `The middle one (${d[1]} cm)`, `The furthest (${d[2]} cm)`, 'They all land together'], correct: 2,
     explain: 'r = mv/Bq. All the ions have the same q, v and B, so r ∝ m: the heaviest lands furthest.',
@@ -1290,6 +1451,9 @@ m3.questions = async function () {
     explain: 'If speeds differed, ions of the same mass would land in different places. Selecting one speed makes r ∝ m.',
     why: ['The selector does not change charge.', '', 'It picks out one speed; it does not slow ions down.', 'The ions are already charged before they reach it.'] }) ? 1 : 0;
   if (current !== this) return;
+  this.finish(ok);
+};
+m3.finish = function (ok) {
   this.phase = 'done';
   const n = this.checks <= 1 && ok >= 2 && this.misses <= 2 ? 3 : this.checks <= 3 && ok >= 1 ? 2 : 1;
   finishMission(this, n, [
@@ -1299,17 +1463,49 @@ m3.questions = async function () {
     { t: '• In the second field r = mv/Bq ∝ m: heavier ions land further away.', size: 30 },
   ]);
 };
+// Questions for levels 2 and 3 (d: line distances as text in cm; dm: distances in m)
+const M3_QUESTIONS = [null,
+  (d) => [
+    { q: 'Which line is made by chlorine-37?',
+      options: [`The nearer line (${d[0]} cm)`, `The further line (${d[1]} cm)`, 'Both lines', 'Neither: chlorine-37 does not reach the detector'], correct: 1,
+      explain: 'All the ions have the same q, v and B, so r = mv/Bq ∝ m. The heavier isotope, chlorine-37, lands further away.',
+      why: ['That is chlorine-35, the lighter and more common isotope (it is the brighter line).', '', 'Each mass has its own radius, so each isotope makes its own line.', 'Both isotopes are selected at the same speed and both reach the detector.'] },
+    { q: 'The nearer line collects three times as many ions as the further one. What is the relative atomic mass of chlorine?',
+      options: ['35.5', '36.0', '35.0', '37.0'], correct: 0,
+      explain: 'Weighted mean: (3 × 35 + 1 × 37) / 4 = 142 / 4 = 35.5.',
+      why: ['', 'That is the plain average. Chlorine-35 is three times as common, so weight it three times.', 'That ignores chlorine-37 completely.', 'That ignores chlorine-35, which is the more common isotope.'] },
+    { q: 'What is the ratio of the distances: d(chlorine-37) / d(chlorine-35)?',
+      options: ['37/35 = 1.06', '35/37 = 0.95', '(37/35)² = 1.12', '1, they land in the same place'], correct: 0,
+      explain: `d = 2r = 2mv/Bq, so d ∝ m. ${d[1]} / ${d[0]} = ${(d[1] / d[0]).toFixed(2)}.`,
+      why: ['', 'That is upside down: the heavier isotope goes further.', 'r is proportional to m, not m².', 'Different masses give different radii.'] },
+  ],
+  (d, dm) => [
+    { q: `The nearest line is ${d[0]} cm from the slit. Using m = qBd / 2v with v = 1.6 × 10⁵ m/s, what is the mass of these ions?`,
+      options: ['24 u', '48 u', '19 u', 'You cannot tell without knowing the element'], correct: 0,
+      explain: `m = (1.6 × 10⁻¹⁹ × 0.20 × ${dm[0].toFixed(3)}) / (2 × 1.6 × 10⁵) = ${sig(E_CH * B2 * dm[0] / (2 * 1.6e5))} kg = 24 u.`,
+      why: ['', 'd is the diameter. m = qBd / 2v: that answer leaves out the 2.', 'That uses v = 2.0 × 10⁵ m/s. This sample was selected at 1.6 × 10⁵ m/s.', 'The spectrometer measures mass directly from q, B, d and v. That is how we find the element.'] },
+    { q: 'The lines are at 24 u (79%), 25 u (10%) and 26 u (11%). What is the relative atomic mass, and which metal is it?',
+      options: ['24.3: magnesium', '25.0: manganese', '23.0: sodium', '27.0: aluminium'], correct: 0,
+      explain: 'Ar = 0.79 × 24 + 0.10 × 25 + 0.11 × 26 = 24.3. That is magnesium.',
+      why: ['', 'That is the plain average of the three. Weight each by how common it is.', 'Sodium has only one isotope, at 23 u: there is no 23 u line.', 'Aluminium has one isotope, at 27 u: there is no 27 u line.'] },
+    { q: 'The field B₂ is doubled. What happens to the lines?',
+      options: ['They all move to half their distance from the slit', 'They all move twice as far', 'They stay where they are', 'They spread four times further apart'], correct: 0,
+      explain: 'r = mv/Bq: doubling B halves every radius, so every line moves to half its distance.',
+      why: ['', 'A stronger field bends the ions more sharply, so the circles get smaller.', 'r depends on B.', 'r ∝ 1/B, so the spacing halves too.'] },
+  ],
+];
 const _ionP = new V3(), _ionC = new THREE.Color();
 m3.tick = function (dt, t) {
-  const K = 0.32 / V_SEL;                 // display speed: 2 × 10⁵ m/s shows as 0.32 m/s
+  const K = 0.32 / this.vSel;             // display speed: the selected speed shows as 0.32 m/s
   const E = this.E();
   this.srcGlow.material.opacity = 0.45 + 0.2 * Math.sin(t * 9);
   this.spawnT += dt;
   while (this.spawnT > 0.018 && this.ionList.length < N_IONS) {
     this.spawnT -= 0.018;
     const r = Math.random();
-    const iso = this.stageB ? (r < ISOTOPES[0].w ? 0 : r < ISOTOPES[0].w + ISOTOPES[1].w ? 1 : 2) : 0;
-    this.ionList.push({ x: -0.44, z: (Math.random() - 0.5) * 0.004, v: 1.6e5 + Math.random() * 0.8e5, iso, m: ISOTOPES[iso].A * U, state: 'sel', phi: 0, vz: 0 });
+    let iso = 0;
+    if (this.stageB) { let acc = 0; iso = this.iso.length - 1; for (let k = 0; k < this.iso.length; k++) { acc += this.iso[k].w; if (r < acc) { iso = k; break; } } }
+    this.ionList.push({ x: -0.44, z: (Math.random() - 0.5) * 0.004, v: this.vSel * (0.8 + Math.random() * 0.4), iso, m: this.iso[iso].A * U, state: 'sel', phi: 0, vz: 0 });
   }
   if (this.spawnT > 0.018) this.spawnT = 0.018;
   const now = performance.now();
@@ -1358,8 +1554,8 @@ m3.tick = function (dt, t) {
     const ion = this.ionList[i];
     if (!ion) { this.ions.hide(i); continue; }
     _ionP.set(ion.x, 0, ion.z);
-    if (this.stageB && ion.state === 'arc') _ionC.set(ISOTOPES[ion.iso].color);
-    else _ionC.setHSL(clamp((ion.v - 1.6e5) / 0.8e5, 0, 1) * 0.66, 0.95, 0.6);
+    if (this.stageB && ion.state === 'arc') _ionC.set(this.iso[ion.iso].color);
+    else _ionC.setHSL(clamp((ion.v / this.vSel - 0.8) / 0.4, 0, 1) * 0.66, 0.95, 0.6);
     this.ions.set(i, _ionP, ion.state === 'dead' ? 0.6 : 1, ion.state === 'dead' ? 0x666666 : _ionC.getHex());
   }
   this.ions.commit();
@@ -1371,17 +1567,39 @@ m3.tick = function (dt, t) {
 const COIL_X = -0.08, COIL_LEN = 0.16, COIL_R = 0.05, TURNS = 200, PHI0 = 5.0e-6, A_FLUX = 0.08;
 const MAG_LEN = 0.13, X_MIN = 0, X_MAX = 0.44;       // magnet centre, measured from the coil centre
 const m4 = { title: 'Experiment 4: Induction', short: 'Induction', controls: new THREE.Group(), world: new THREE.Group(), scale0: 1.4 };
+m4.levels = [
+  { name: 'Faraday and Lenz', tasks: [
+    'Push the N pole into the coil. Watch the meter.',
+    'Hold the magnet still inside the coil.',
+    'Pull the magnet out again.',
+    'Move it fast enough to make the meter read more than 3 mV.',
+    'Turn the magnet round and push the S pole in.'],
+    brief: 'Every power station in Zimbabwe, from Kariba to Hwange, makes electricity the same way: by moving magnets near coils. Find out what makes a current flow, and which way.',
+    debrief: 'Change the flux and you get an e.m.f. Change it faster and you get more. That is the whole secret of a power station.' },
+  { name: 'Coil Design', tasks: [
+    'With 200 turns, press Push in slowly. Note the biggest reading.',
+    'Pull the magnet out, choose 400 turns, then push in slowly again.',
+    'Pull it out, choose 100 turns, and push in slowly once more.'],
+    brief: 'Our river turns slowly, so the generator coil must make the most of it. Test how the number of turns changes the e.m.f. Use the Push in slowly button so every test is fair: same magnet, same speed.',
+    debrief: 'Twice the turns, twice the e.m.f. We will wind the station\'s coil with plenty of turns.' },
+  { name: 'Lenz Predictions', tasks: [],
+    brief: 'Before you touch the real generator, I need to know you can predict induced currents in your head. Four tests: predict which way the needle swings, then watch.',
+    debrief: 'Four for four is what I like to see. Lenz\'s law is just energy conservation: the coil always fights the change.' },
+];
 missions.push(m4);
 panel.add(m4.controls); app.add(m4.world);
 m4.world.position.set(0, 0.105, 0.05);
 {
   const W = m4.world;
   class Helix extends THREE.Curve {
-    getPoint(t, out = new V3()) { const a = t * Math.PI * 2 * 14; return out.set(COIL_X - COIL_LEN / 2 + t * COIL_LEN, Math.sin(a) * COIL_R, Math.cos(a) * COIL_R); }
+    getPoint(t, out = new V3()) { const a = t * Math.PI * 2 * m4.helixTurns; return out.set(COIL_X - COIL_LEN / 2 + t * COIL_LEN, Math.sin(a) * COIL_R, Math.cos(a) * COIL_R); }
   }
+  m4.helixTurns = 14;
   m4.helix = new Helix();
   m4.coil = mesh(new THREE.TubeGeometry(m4.helix, 700, 0.0035, 6, false), mat(COL.copper, { metalness: 0.75, roughness: 0.32, emissive: 0xff8a2a, emissiveIntensity: 0 }));
   W.add(noHit(m4.coil));
+  m4.turnsLabel = textSprite('200 turns', { size: 0.026, color: '#ffcf9a' });
+  m4.turnsLabel.position.set(COIL_X, -0.1, 0.07); W.add(m4.turnsLabel);
   W.add(noHit(mesh(new THREE.CylinderGeometry(COIL_R - 0.004, COIL_R - 0.004, COIL_LEN + 0.01, 24, 1, true).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }), COIL_X, 0, 0)));
   m4.coilDots = dotPool(40, 0.0042, W, { color: 0xffe28a });
   // stand and rail
@@ -1490,27 +1708,121 @@ m4.world.position.set(0, 0.105, 0.05);
   m4.flipBtn.position.set(-0.24, 0.07, 0);
   m4.resetBtn = actionButton('Magnet back to start', 0.3, 0.085, () => { m4.target = 0.3; m4.x = 0.3; m4.prevPhi = m4.phi(m4.x); }, { bg: '#4b5d6e', size: 24 });
   m4.resetBtn.position.set(-0.24, -0.06, 0);
-  m4.inBtn = actionButton('Push in slowly', 0.24, 0.085, () => m4.autoMove(0.0, 2.0), { bg: '#1f6fb2', size: 24 });
+  m4.inBtn = actionButton('Push in slowly', 0.24, 0.085, () => m4.pushIn(), { bg: '#1f6fb2', size: 24 });
   m4.outBtn = actionButton('Pull out slowly', 0.24, 0.085, () => m4.autoMove(0.3, 2.0), { bg: '#1f6fb2', size: 24 });
   m4.inBtn.position.set(0.07, 0.07, 0); m4.outBtn.position.set(0.07, -0.06, 0);
   m4.controls.add(m4.flipBtn, m4.resetBtn, m4.inBtn, m4.outBtn);
+  // level 2: choose the number of turns
+  m4.turnBtns = [100, 200, 400].map((n, i) => {
+    const b = actionButton(`${n} turns`, 0.15, 0.07, () => m4.setTurns(n), { bg: '#7a4a1e', size: 24, name: `Use a coil of ${n} turns` });
+    b.position.set(0.3, 0.1 - i * 0.08, 0);
+    m4.controls.add(b);
+    return b;
+  });
+  // level 3: predict the needle
+  m4.predBtns = [['L', 'Needle swings\nLEFT'], ['R', 'Needle swings\nRIGHT']].map(([k, t], i) => {
+    const b = actionButton(t, 0.26, 0.12, () => m4.predict(k), { bg: '#2d4a66', size: 26, name: `Predict: the needle swings ${k === 'L' ? 'left' : 'right'}` });
+    b.position.set(-0.3 + i * 0.3, 0.02, 0);
+    m4.controls.add(b);
+    return b;
+  });
 }
-m4.TASKS = [
-  'Push the N pole into the coil. Watch the meter.',
-  'Hold the magnet still inside the coil.',
-  'Pull the magnet out again.',
-  'Move it fast enough to make the meter read more than 3 mV.',
-  'Turn the magnet round and push the S pole in.',
-];
+m4.N = TURNS;
+m4.setTurns = function (n, quiet = false) {
+  if (!quiet && this.phase !== 'play') return;
+  if (!quiet && this.x < 0.25) { toast('Pull the magnet out of the coil first.', 'warn', 2.2); return; }
+  this.N = n;
+  this.helixTurns = n === 100 ? 8 : n === 200 ? 14 : 26;
+  this.coil.geometry.dispose();
+  this.coil.geometry = new THREE.TubeGeometry(this.helix, this.helixTurns * 50, n === 400 ? 0.0028 : 0.0035, 6, false);
+  this.turnsLabel.userData.set(`${n} turns`);
+  this.turnBtns.forEach((b, i) => b.userData.draw(undefined, [100, 200, 400][i] === n ? '#d4801f' : '#7a4a1e'));
+  if (!quiet) { sfx.snap(); this.drawData(); }
+};
 m4.enter = function () {
-  this.phase = 'play'; this.flipped = false; this.task = 0; this.done = []; this.note = null;
+  const lv = this.lv || 0;
+  this.phase = lv === 2 ? 'predict' : 'play'; this.flipped = false; this.task = 0; this.done = []; this.note = null;
   this.target = 0.3; this.x = 0.3; this.emf = 0; this.shown = 0; this.peak = 0; this.stillT = 0; this.signIn = 0; this.dotPhase = 0;
+  this.trials = {}; this.pushing = false; this.pushId = (this.pushId || 0) + 1;
+  this.setTurns(200, true);
   this.prevPhi = this.phi(this.x);
   this.applyFlip(); this.place();
+  this.flipBtn.visible = lv === 0; this.resetBtn.visible = lv === 0;
+  this.inBtn.visible = lv !== 2; this.outBtn.visible = lv !== 2;
+  this.turnBtns.forEach((b) => (b.visible = lv === 1));
+  this.predBtns.forEach((b) => (b.visible = lv === 2));
   this.flipBtn.userData.setOn(false);
   this.hum = sfx.loop({ type: 'sawtooth', freq: 90, vol: 0, cutoff: 500 });
-  hint.show(this.magnet, [0, 0.07, 0]);
+  if (lv === 2) {
+    this.rounds = shuffle([['N', 'in'], ['N', 'out'], ['S', 'in'], ['S', 'out']]);
+    this.round = 0; this.right = 0;
+    this.lenzRound();
+  } else hint.show(lv === 1 ? this.inBtn : this.magnet, lv === 1 ? [0, 0.07, 0.02] : [0, 0.07, 0]);
   this.redraw(); this.drawData();
+};
+// Level 2: a fair test. The button always pushes from the start position at the same speed.
+m4.pushIn = function () {
+  if ((this.lv || 0) !== 1) { this.autoMove(0.0, 2.0); return; }
+  if (this.phase !== 'play' && this.phase !== 'quiz' && this.phase !== 'done') return;
+  if (this.target < 0.29) { toast('Pull the magnet out first (Pull out slowly).', 'warn', 2.2); hint.show(this.outBtn, [0, 0.07, 0.02]); return; }
+  hint.hide();
+  this.pushing = true; this.pushPeak = 0;
+  const id = ++this.pushId, from = this.target;
+  tween(2.0, (k) => { if (id === this.pushId) this.target = from * (1 - k); }, (k) => k).then(async () => {
+    await wait(0.4);
+    if (id !== this.pushId || current !== this) return;
+    this.pushing = false;
+    const N = this.N, mV = this.pushPeak * 1000;
+    this.trials[N] = mV;
+    this.drawData();
+    if (this.phase !== 'play') return;
+    const order = [200, 400, 100];
+    if (N !== order[this.task]) { toast(`${N} turns: ${mV.toFixed(2)} mV`, 'info', 2.2); return; }
+    const t2 = this.trials[200];
+    const msg = this.task === 0 ? `200 turns: the peak was ${mV.toFixed(2)} mV.`
+      : this.task === 1 ? `400 turns: ${mV.toFixed(2)} mV, ${(mV / t2).toFixed(1)} times the 200-turn reading. Twice the turns, twice the e.m.f.`
+        : `100 turns: ${mV.toFixed(2)} mV, ${(mV / t2).toFixed(1)} times the 200-turn reading. E = N dΦ/dt, so the e.m.f. is proportional to N.`;
+    this.complete(this.task, msg);
+    if (this.phase === 'play') hint.show(this.outBtn, [0, 0.07, 0.02]);
+  });
+};
+// Level 3: predict the needle, then watch
+m4.lenzRound = function () {
+  const [pole, dir] = this.rounds[this.round];
+  this.flipped = pole === 'S'; this.applyFlip();
+  this.target = this.x = dir === 'in' ? 0.3 : 0.0;
+  this.prevPhi = this.phi(this.x); this.shown = 0; this.place();
+  this.phase = 'predict'; this.pred = null; this.lenzPeak = 0;
+  this.predBtns.forEach((b) => { b.userData.setOn(true); b.userData.draw(undefined, '#2d4a66'); });
+  hint.show(this.predBtns[0], [0, 0.1, 0.02]);
+  this.redraw();
+};
+m4.predict = async function (side) {
+  if (this.phase !== 'predict') return;
+  hint.hide();
+  const [pole, dir] = this.rounds[this.round];
+  this.pred = side; this.phase = 'moving'; this.lenzPeak = 0;
+  this.predBtns.forEach((b, i) => { b.userData.setOn(false); b.userData.draw(undefined, ['L', 'R'][i] === side ? '#1e8449' : '#2d4a66'); });
+  sfx.snap();
+  this.redraw();
+  const from = this.target, to = dir === 'in' ? 0.0 : 0.3;
+  await tween(1.2, (k) => { this.target = from + (to - from) * k; }, (k) => k);
+  await wait(0.5);
+  if (current !== this) return;
+  const swung = this.lenzPeak < 0 ? 'L' : 'R', ok = swung === side;
+  const word = swung === 'L' ? 'LEFT' : 'RIGHT';
+  const fluxUp = dir === 'in';
+  const near = fluxUp ? pole : (pole === 'N' ? 'S' : 'N');
+  this.note = `${pole} pole ${dir === 'in' ? 'pushed in' : 'pulled out'}: the coil end becomes ${near === 'N' ? 'an N' : 'an S'} pole to ${fluxUp ? 'push the magnet back' : 'pull the magnet back'}, so the needle swings ${word}.`;
+  if (ok) { this.right++; sfx.good(); toast(`Right: it swung ${word}`, 'good', 2.4); }
+  else { sfx.bad(); toast(`It swung ${word}`, 'bad', 2.4); }
+  this.phase = 'shown';
+  this.redraw(); this.drawData();
+  await wait(ok ? 3.2 : 5);
+  if (current !== this) return;
+  this.round++;
+  if (this.round < this.rounds.length) { this.note = null; this.lenzRound(); }
+  else { this.phase = 'play'; this.questions(); }
 };
 m4.leave = function () { this.hum?.stop(); this.hum = null; };
 m4.autoMove = function (to, secs) {
@@ -1522,6 +1834,7 @@ m4.autoMove = function (to, secs) {
 // flux through the coil from the magnet at distance x (centre to centre); positive when the N pole faces the coil
 m4.phi = function (x) { const f = 1 / Math.pow(1 + (x / A_FLUX) * (x / A_FLUX), 1.5); return (this.flipped ? -1 : 1) * PHI0 * f; };
 m4.flip = function () {
+  if ((this.lv || 0) !== 0) return;
   if (this.task !== 4 && !(this.phase === 'quiz' || this.phase === 'done')) { toast('First finish the steps on the board.', 'info', 2); return; }
   if (this.x < 0.2) { toast('Pull the magnet out of the coil before turning it round.', 'warn', 2.5); return; }
   this.flipped = !this.flipped; this.prevPhi = this.phi(this.x); sfx.whoosh();
@@ -1538,20 +1851,37 @@ m4.place = function () { this.magnet.position.set(COIL_X + this.x, 0, 0); };
 m4.redraw = function () {
   if (Q.active || this.phase === 'done' || this.phase === 'quiz') return;
   const how = input.kind === 'hand' ? 'Pinch the magnet and slide it (or point at it and pinch).' : input.kind === 'controller' ? 'Hold the trigger on the magnet and slide it.' : 'Drag the magnet with the mouse, or use the push and pull buttons.';
+  const lv = this.lv || 0;
+  if (lv === 2) {
+    const [pole, dir] = this.rounds[this.round];
+    info.userData.draw([
+      this.round === 0 && !this.pred && brief(this),
+      { t: `Prediction ${this.round + 1} of 4: the ${pole} pole will be ${dir === 'in' ? 'PUSHED INTO' : 'PULLED OUT OF'} the coil.`, size: 33, bold: true, color: '#ffd34d', gap: 8 },
+      { t: 'Which way will the meter needle swing? Choose on the panel, then watch.', size: 30, gap: 8 },
+      { t: 'Remember from level 1: pushing the N pole in made the needle swing LEFT. Think about how the flux changes, and which pole the coil end must become.', size: 27, color: '#9fb6cc' },
+      this.note && { rule: true },
+      this.note && { t: this.note, size: 28, color: '#e0b3ff' },
+    ], { title: heading(this) });
+    return;
+  }
   info.userData.draw([
-    { t: 'A coil of 200 turns is joined to a centre-zero meter and two LEDs. Move the bar magnet along its rail.', size: 30, gap: 8 },
-    { t: how, size: 28, color: '#cfe3ff', gap: 10 },
-    ...this.TASKS.map((t, i) => ({ t: `${this.done[i] ? '✓' : i === this.task ? '→' : '•'}  ${t}`, size: 30, color: this.done[i] ? '#8ef0a8' : i === this.task ? '#ffd34d' : '#9fb6cc', gap: 6 })),
+    this.task === 0 && brief(this),
+    { t: lv === 1 ? 'Choose the number of turns on the panel. Only the Push in slowly button counts as a fair test: it always moves at the same speed.'
+      : 'A coil of 200 turns is joined to a centre-zero meter and two LEDs. Move the bar magnet along its rail.', size: 30, gap: 8 },
+    lv === 0 && { t: how, size: 28, color: '#cfe3ff', gap: 10 },
+    ...lvl(this).tasks.map((t, i) => ({ t: `${this.done[i] ? '✓' : i === this.task ? '→' : '•'}  ${t}`, size: 30, color: this.done[i] ? '#8ef0a8' : i === this.task ? '#ffd34d' : '#9fb6cc', gap: 6 })),
     this.note && { rule: true },
     this.note && { t: this.note, size: 28, color: '#e0b3ff' },
-  ], { title: this.title });
+  ], { title: heading(this) });
 };
 m4.drawData = function () {
   const ph = this.phi(this.x);
   data.userData.draw([
     { t: `E.m.f. = ${(this.shown * 1000).toFixed(2)} mV`, size: 40, bold: true, color: Math.abs(this.shown) > 1e-4 ? '#ffd34d' : '#eef3f8' },
-    { t: `Flux linkage NΦ = ${sig(TURNS * ph, 2)} Wb`, size: 30, color: '#cfe3ff' },
-    { t: `Biggest reading so far: ${(this.peak * 1000).toFixed(2)} mV`, size: 30, color: '#9fb6cc' },
+    { t: `Flux linkage NΦ = ${sig(this.N * ph, 2)} Wb   (N = ${this.N})`, size: 30, color: '#cfe3ff' },
+    (this.lv || 0) === 1 ? { t: `Fair-test peaks:  100 turns ${this.trials[100] != null ? this.trials[100].toFixed(2) + ' mV' : '–'}   ·   200 turns ${this.trials[200] != null ? this.trials[200].toFixed(2) + ' mV' : '–'}   ·   400 turns ${this.trials[400] != null ? this.trials[400].toFixed(2) + ' mV' : '–'}`, size: 28, bold: true, color: '#ffcf9a' }
+      : (this.lv || 0) === 2 ? { t: `Predictions right: ${this.right} of ${this.round + (this.phase === 'shown' ? 1 : 0)}`, size: 30, color: '#ffcf9a' }
+        : { t: `Biggest reading so far: ${(this.peak * 1000).toFixed(2)} mV`, size: 30, color: '#9fb6cc' },
     { rule: true },
     { t: 'Faraday: e.m.f. = −N dΦ/dt (the RATE of change of flux linkage).', size: 28 },
     { t: 'Lenz: the induced current opposes the change that causes it.', size: 28 },
@@ -1563,9 +1893,9 @@ m4.complete = function (i, msg) {
   this.done[i] = true; this.task = i + 1;
   this.note = msg;
   sfx.good(); toast(headline(msg), 'good', 2.6);
-  if (this.task === 4) { this.flipBtn.userData.setOn(true); hint.show(this.flipBtn, [0, 0.07, 0.02]); }
+  if (this.task === 4 && (this.lv || 0) === 0) { this.flipBtn.userData.setOn(true); hint.show(this.flipBtn, [0, 0.07, 0.02]); }
   this.redraw();
-  if (this.task >= this.TASKS.length) this.questions();
+  if (this.task >= lvl(this).tasks.length) this.questions();
 };
 const _p4 = new V3();
 m4.tick = function (dt, t) {
@@ -1574,25 +1904,27 @@ m4.tick = function (dt, t) {
   this.place();
   const ph = this.phi(this.x);
   const dPhi = ph - this.prevPhi; this.prevPhi = ph;
-  const emf = dt > 0 ? -TURNS * dPhi / dt : 0;
+  const emf = dt > 0 ? -this.N * dPhi / dt : 0;
   this.emf = emf;
   this.shown += (emf - this.shown) * (1 - Math.exp(-14 * dt));
   if (Math.abs(this.shown) < 2e-6 && Math.abs(emf) < 2e-6) this.shown = 0;
   const mV = this.shown * 1000;
   this.needle.rotation.z = -clamp(mV / 5, -1.15, 1.15) * (Math.PI * 0.33);
   this.peak = Math.max(this.peak, Math.abs(this.shown));
+  if (this.pushing) this.pushPeak = Math.max(this.pushPeak, Math.abs(this.shown));
+  if (this.phase === 'moving' && Math.abs(mV) > Math.abs(this.lenzPeak)) this.lenzPeak = mV;
   const v = (this.x - prev) / Math.max(dt, 1e-4);           // + = moving away from the coil
   // what you see and hear: LEDs, glowing coil, current dots, a hum that rises with the e.m.f.
-  const lvl = clamp(Math.abs(mV) / 3, 0, 1);
-  this.leds[0].m.emissiveIntensity = mV > 0.05 ? 0.3 + 2.5 * lvl : 0.05; this.leds[0].glow.material.opacity = mV > 0.05 ? lvl : 0;
-  this.leds[1].m.emissiveIntensity = mV < -0.05 ? 0.3 + 2.5 * lvl : 0.05; this.leds[1].glow.material.opacity = mV < -0.05 ? lvl : 0;
-  this.coil.material.emissiveIntensity = 0.5 * lvl;
+  const glo = clamp(Math.abs(mV) / 3, 0, 1);
+  this.leds[0].m.emissiveIntensity = mV > 0.05 ? 0.3 + 2.5 * glo : 0.05; this.leds[0].glow.material.opacity = mV > 0.05 ? glo : 0;
+  this.leds[1].m.emissiveIntensity = mV < -0.05 ? 0.3 + 2.5 * glo : 0.05; this.leds[1].glow.material.opacity = mV < -0.05 ? glo : 0;
+  this.coil.material.emissiveIntensity = 0.5 * glo;
   this.dotPhase += dt * clamp(mV / 2, -2.5, 2.5) * 0.25;
   if (Math.abs(mV) > 0.05) {
     for (let i = 0; i < 40; i++) { const s = (((i / 40 + this.dotPhase) % 1) + 1) % 1; this.helix.getPoint(s, _p4); this.coilDots.set(i, _p4, 1); }
     this.coilDots.commit(); this.dotsOn = true;
   } else if (this.dotsOn) { this.coilDots.hideAll(); this.dotsOn = false; }
-  this.hum?.set({ vol: 0.05 * lvl, freq: 80 + 120 * lvl });
+  this.hum?.set({ vol: 0.05 * glo, freq: 80 + 120 * glo });
   m4.halo.material.opacity += ((this.hover || this.dragging ? 0.6 : 0) - m4.halo.material.opacity) * 0.25;
   // field-line dots flow from N round to S
   let k = 0;
@@ -1610,7 +1942,7 @@ m4.tick = function (dt, t) {
     const facing = this.flipped ? 'S' : 'N';
     this.endPole.userData.set(`${pole} pole: ${pole === facing ? 'repels' : 'attracts'}`, pole === 'N' ? '#ff8a80' : '#8ab4ff');
   }
-  if (this.phase === 'play') {
+  if (this.phase === 'play' && (this.lv || 0) === 0) {
     const inside = this.x < 0.04;
     if (this.task === 0 && v < -0.02 && Math.abs(mV) > 0.25 && !this.flipped) {
       this.signIn = Math.sign(mV);
@@ -1636,6 +1968,25 @@ m4.questions = async function () {
   this.controls.visible = false;
   const go = askIf(this);
   let ok = 0;
+  const lv = this.lv || 0;
+  if (lv > 0) {
+    const set = M4_QUESTIONS[lv];
+    for (const [k, q] of set.entries()) {
+      ok += await go({ title: `Question ${k + 1} of ${set.length}`, ...q }) ? 1 : 0;
+      if (current !== this) return;
+    }
+    this.phase = 'done';
+    const n = lv === 1 ? (ok === 3 ? 3 : ok === 2 ? 2 : 1) : (this.right + ok >= 5 ? 3 : this.right + ok >= 3 ? 2 : 1);
+    finishMission(this, n, [
+      { t: lv === 1 ? `All three fair tests done. Questions right first time: ${ok} of 3.` : `Predictions right: ${this.right} of 4. Questions right first time: ${ok} of 2.`, size: 30 },
+      { t: 'Key ideas', size: 32, bold: true, color: '#ffd34d' },
+      lv === 1 ? { t: '• E = −N dΦ/dt: the e.m.f. is proportional to the number of turns N, and to how fast the flux changes.', size: 30 }
+        : { t: '• Flux increasing: the coil end repels the magnet. Flux decreasing: it attracts it. The induced current always opposes the change.', size: 30 },
+      lv === 1 ? { t: '• A fair test changes one thing at a time: here N, with the same magnet and the same speed.', size: 30 }
+        : { t: '• Pushing the S pole in has the same effect on the meter as pulling the N pole out.', size: 30 },
+    ]);
+    return;
+  }
   ok += await go({ title: 'Question 1 of 2', q: 'As the N pole of a magnet is pushed towards a coil, the end of the coil nearest the magnet becomes…',
     options: ['an N pole, which repels the magnet', 'an S pole, which attracts the magnet', 'no pole at all', 'an N pole, which attracts the magnet'], correct: 0,
     explain: 'Lenz\'s law: the induced current opposes the change. Repelling the approaching N pole means you must do work, and that work becomes electrical energy.',
@@ -1655,9 +2006,56 @@ m4.questions = async function () {
   ]);
 };
 
+const M4_QUESTIONS = [null, [
+  { q: 'The same magnet is pushed in at the same speed, but the coil has twice as many turns. The peak e.m.f. …',
+    options: ['doubles', 'halves', 'stays the same', 'becomes four times bigger'], correct: 0,
+    explain: 'E = N dΦ/dt. The flux through each turn changes at the same rate, and there are twice as many turns, so the e.m.f. doubles.',
+    why: ['', 'More turns give more e.m.f., not less.', 'Each turn adds its own e.m.f., so N matters.', 'E is proportional to N, not N².'] },
+  { q: 'The flux through each turn of a 400-turn coil falls by 2.0 × 10⁻⁵ Wb in 0.050 s. What is the average induced e.m.f.?',
+    options: ['0.16 V', '4.0 × 10⁻⁴ V', '8.0 × 10⁻³ V', '0.32 V'], correct: 0,
+    explain: 'E = N ΔΦ/Δt = 400 × 2.0 × 10⁻⁵ / 0.050 = 0.16 V.',
+    why: ['', 'That is the e.m.f. for ONE turn. Multiply by N = 400.', 'That is the change in flux linkage. Divide by the time, 0.050 s.', 'Check the time: divide by 0.050 s, not 0.025 s.'] },
+  { q: 'Apart from more turns, which two changes would also make the e.m.f. bigger?',
+    options: ['Move the magnet faster; use a stronger magnet', 'Use thinner wire; move the magnet slower', 'Hold the magnet still in the coil; use a weaker magnet', 'Use a plastic former; move the magnet slower'], correct: 0,
+    explain: 'The e.m.f. depends on the rate of change of flux linkage: a stronger magnet changes the flux by more, and moving faster changes it in less time.',
+    why: ['', 'Moving slower makes the e.m.f. smaller. Thinner wire changes the resistance, not the e.m.f.', 'A still magnet gives no e.m.f. at all.', 'Slower movement gives a smaller e.m.f.'] },
+], [
+  { q: 'A strong magnet is dropped down a vertical copper pipe. Compared with dropping it down a plastic pipe, it falls…',
+    options: ['much more slowly, because induced currents in the copper oppose its motion', 'faster, because the induced currents attract it downwards', 'at the same rate, because copper is not magnetic', 'and stops completely inside the pipe'], correct: 0,
+    explain: 'The falling magnet changes the flux through rings of copper, inducing eddy currents. By Lenz\'s law they oppose the motion, so the magnet falls slowly.',
+    why: ['', 'Speeding it up would create energy from nothing. Induced currents always oppose the change.', 'Copper is not magnetic, but it conducts: the induced currents make their own magnetic field.', 'The opposing force only exists while it moves, so it slows the magnet but cannot stop it.'] },
+  { q: 'Lenz\'s law is a consequence of the conservation of…',
+    options: ['energy', 'charge', 'momentum', 'mass'], correct: 0,
+    explain: 'You must do work against the opposing force to move the magnet. That work is the electrical energy produced.',
+    why: ['', 'Charge is conserved, but that is not what sets the direction of the induced current.', 'Momentum is not what Lenz\'s law is about.', 'Mass is not involved.'] },
+]];
+
 // ================================================================= Experiment 5: Generator
 const GEN_B = 0.10, GEN_A = 0.010, GEN_N = 200, CRANK_R = 0.075, SCOPE_N = 300, SCOPE_V = 8;
 const m5 = { title: 'Experiment 5: Generator', short: 'Generator', controls: new THREE.Group(), world: new THREE.Group(), scale0: 1.35 };
+// band: the "lamp fully lit" band on the scope for each task; angleTask / want: the Check angle task
+m5.levels = [
+  { name: 'Hand Generator', N: 200, bulbV: 3.4, angleTask: 3, want: 'max', bands: [null, [3.0, 3.8]], tasks: [
+    'Grab the red crank handle and wind the coil round at least one full turn. Watch the scope.',
+    'Use the motor to light the bulb fully: a peak e.m.f. between 3.0 V and 3.8 V.',
+    'Now double the motor speed. Watch the trace.',
+    'Stop the motor. Turn the coil to where the e.m.f. is biggest as it turns, then press Check angle.'],
+    brief: 'This is a model of the station\'s generator. Wind it by hand first, then with the motor, and watch the alternating current it makes.',
+    debrief: 'You have made a.c. The real generator is the same idea, just bigger and turned by the river.' },
+  { name: 'Clinic Lamp', N: 400, bulbV: 6.0, angleTask: 2, want: 'zero', bands: [[5.6, 6.4], [2.7, 3.3]], tasks: [
+    'Use the motor to light the clinic lamp fully: a peak e.m.f. between 5.6 V and 6.4 V.',
+    'The night light needs half the peak voltage. Set the peak to between 2.7 V and 3.3 V.',
+    'Stop the motor. Turn the coil to a position where the e.m.f. would be ZERO as it turns, then press Check angle.'],
+    brief: 'The ward lamp needs a peak of 6.0 V. We rewound the coil with 400 turns. Find the speed that lights it fully, then the speed for the dimmer night light.',
+    debrief: 'Day lamp and night light both work. A nurse can now read a chart at 2 a.m.' },
+  { name: 'Match the Trace', N: 200, bulbV: 6.0, bands: [], ghosts: [{ N: 100, f: 4.0, name: 'A' }, { N: 400, f: 3.0, name: 'B' }], tasks: [
+    'Match ghost trace A (gold): choose the number of turns and the motor speed. Hold the match for 1.5 s.',
+    'Now match ghost trace B the same way.'],
+    brief: 'Final test before the clinic opens. The gold traces on the scope came from the station\'s generators. Work out how many turns and what speed made each one, and copy it exactly.',
+    debrief: 'Perfect matches. You can read a generator from its trace alone. The clinic is ready to switch on.' },
+];
+m5.emf0 = (N, f) => GEN_B * GEN_A * N * 2 * Math.PI * f;
+m5.N = GEN_N; m5.bulbV = 3.4;
 missions.push(m5);
 panel.add(m5.controls); app.add(m5.world);
 m5.world.position.set(0.02, 0.21, -0.02);
@@ -1751,21 +2149,37 @@ m5.world.position.set(0.02, 0.21, -0.02);
   m5.checkBtn = actionButton('Check angle', 0.28, 0.09, () => m5.checkAngle(), { bg: '#1e8449', size: 28 });
   m5.checkBtn.position.set(-0.025, -0.03, 0);
   m5.controls.add(m5.motor.group, m5.nudgeL, m5.nudgeR, m5.checkBtn);
+  // level 3: coils with different numbers of turns
+  m5.turnBtns = [100, 200, 400].map((n, i) => {
+    const b = actionButton(`${n} turns`, 0.14, 0.08, () => m5.setTurns(n), { bg: '#7a4a1e', size: 24, name: `Use a coil of ${n} turns` });
+    b.position.set(-0.14 + i * 0.155, 0.08, 0);
+    m5.controls.add(b);
+    return b;
+  });
+  m5.turnsLabel = textSprite('200 turns', { size: 0.026, color: '#ffcf9a' });
+  m5.turnsLabel.position.set(0, 0.12, 0.1); m5.world.add(m5.turnsLabel);
 }
-m5.TASKS = [
-  'Grab the red crank handle and wind the coil round at least one full turn. Watch the scope.',
-  'Use the motor to light the bulb fully: a peak e.m.f. between 3.0 V and 3.8 V.',
-  'Now double the motor speed. Watch the trace.',
-  'Stop the motor. Turn the coil to where the e.m.f. is biggest as it turns, then press Check angle.',
-];
+m5.setTurns = function (n, quiet = false) {
+  this.N = n;
+  this.turnsLabel.userData.set(`${n} turns`);
+  this.turnBtns.forEach((b, i) => b.userData.draw(undefined, [100, 200, 400][i] === n ? '#d4801f' : '#7a4a1e'));
+  this.holdT = 0;
+  if (!quiet) { sfx.snap(); this.drawData(); }
+};
 m5.enter = function () {
+  const L = lvl(this), lv = this.lv || 0;
+  this.bulbV = L.bulbV;
+  this.setTurns(L.N, true);
+  this.nudgeL.visible = this.nudgeR.visible = this.checkBtn.visible = lv !== 2;
+  this.turnBtns.forEach((b) => (b.visible = lv === 2));
+  this.turnsLabel.visible = lv !== 0;
   this.phase = 'play'; this.task = 0; this.done = []; this.note = null; this.checks = 0;
   this.angle = 0; this.omega = 0; this.nudging = false; this.nudgeId = (this.nudgeId || 0) + 1; this.turned = 0; this.signsSeen = new Set(); this.holdT = 0; this.f1 = null;
   this.trace = new Float32Array(SCOPE_N); this.traceI = 0; this.traceT = 0; this.peak = 0; this.peakT = 0;
   this.motor.set(0, true); this.motor.setEnabled();
   this.checkBtn.userData.setOn(false);
   this.hum = sfx.loop({ type: 'triangle', freq: 60, vol: 0, cutoff: 900 });
-  hint.show(this.grip, [0, 0.06, 0.02]);
+  if (lv === 0) hint.show(this.grip, [0, 0.06, 0.02]); else hint.show(this.motor.group, [0, 0.16, 0.03]);
   this.place(); this.redraw(); this.drawData();
 };
 m5.leave = function () { this.hum?.stop(); this.hum = null; };
@@ -1793,7 +2207,7 @@ m5.nudge = function (deg) {
   tween(0.25, (k) => { if (id === this.nudgeId) this.angle = from + (to - from) * k; }, easeOut)
     .then(() => { if (id === this.nudgeId) { this.angle = to; this.nudging = false; } });
 };
-m5.emfAt = function (angle, omega) { return GEN_B * GEN_A * GEN_N * omega * Math.sin(angle); };
+m5.emfAt = function (angle, omega) { return GEN_B * GEN_A * this.N * omega * Math.sin(angle); };
 m5.place = function () {
   this.rotor.rotation.z = this.angle;
   this.crank.rotation.z = this.angle - Math.PI / 2;
@@ -1801,13 +2215,16 @@ m5.place = function () {
 };
 m5.redraw = function () {
   if (Q.active || this.phase === 'done' || this.phase === 'quiz') return;
+  const lv = this.lv || 0;
   info.userData.draw([
-    { t: 'A coil of 200 turns (area 0.010 m²) turns in a field of 0.10 T. Slip rings take its e.m.f. to a bulb and an oscilloscope.', size: 29, gap: 8 },
-    { t: 'Φ = BA cos θ, so E = BANω sin θ. The white arrow on the coil shows its normal; θ is its angle to the field.', size: 27, color: '#cfe3ff', gap: 10 },
-    ...this.TASKS.map((t, i) => ({ t: `${this.done[i] ? '✓' : i === this.task ? '→' : '•'}  ${t}`, size: 29, color: this.done[i] ? '#8ef0a8' : i === this.task ? '#ffd34d' : '#9fb6cc', gap: 6 })),
+    this.task === 0 && brief(this),
+    { t: `A coil of ${lv === 2 ? 'N' : this.N} turns (area 0.010 m²) turns in a field of 0.10 T. Slip rings take its e.m.f. to a ${lv === 0 ? 'bulb' : 'lamp'} and an oscilloscope.`, size: 29, gap: 8 },
+    lv === 2 ? { t: 'Read each gold trace: its peak gives E₀ = BANω, and the number of cycles in 3 s gives the frequency. Then choose N and the speed.', size: 27, color: '#cfe3ff', gap: 10 }
+      : { t: 'Φ = BA cos θ, so E = BANω sin θ. The white arrow on the coil shows its normal; θ is its angle to the field.', size: 27, color: '#cfe3ff', gap: 10 },
+    ...lvl(this).tasks.map((t, i) => ({ t: `${this.done[i] ? '✓' : i === this.task ? '→' : '•'}  ${t}`, size: 29, color: this.done[i] ? '#8ef0a8' : i === this.task ? '#ffd34d' : '#9fb6cc', gap: 6 })),
     this.note && { rule: true },
     this.note && { t: this.note, size: 27, color: '#e0b3ff' },
-  ], { title: this.title });
+  ], { title: heading(this) });
 };
 m5.drawData = function () {
   const deg = ((this.angle * 180 / Math.PI) % 360 + 360) % 360;
@@ -1815,7 +2232,7 @@ m5.drawData = function () {
   data.userData.draw([
     { t: `e.m.f. = ${this.emf >= 0 ? '+' : '−'}${Math.abs(this.emf || 0).toFixed(2)} V`, size: 40, bold: true, color: '#ffd34d' },
     { t: `Peak e.m.f. E₀ = BANω = ${this.peak.toFixed(2)} V`, size: 30, color: '#cfe3ff' },
-    { t: `Speed ${f.toFixed(2)} rev/s   (ω = ${Math.abs(this.omega).toFixed(1)} rad/s)`, size: 29, color: '#cfe3ff' },
+    { t: `Speed ${f.toFixed(2)} rev/s   (ω = ${Math.abs(this.omega).toFixed(1)} rad/s)    N = ${this.N}`, size: 29, color: '#cfe3ff' },
     { t: `Coil angle θ = ${deg.toFixed(0)}°    Φ = BA cos θ = ${sig(GEN_B * GEN_A * Math.cos(this.angle), 2)} Wb`, size: 27, color: '#9fb6cc' },
     { rule: true },
     { t: 'The e.m.f. is biggest when the flux is changing fastest: when the coil\'s plane is ALONG the field (θ = 90°), not across it.', size: 26, color: '#9fb6cc' },
@@ -1828,9 +2245,23 @@ m5.drawScope = function () {
   for (let i = 1; i < 10; i++) { ctx.beginPath(); ctx.moveTo(i * w / 10, 0); ctx.lineTo(i * w / 10, h); ctx.stroke(); }
   for (let i = 1; i < 6; i++) { ctx.beginPath(); ctx.moveTo(0, i * h / 6); ctx.lineTo(w, i * h / 6); ctx.stroke(); }
   ctx.strokeStyle = 'rgba(80,255,160,0.4)'; ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
-  // band for "bulb fully lit"
-  ctx.fillStyle = 'rgba(255,211,77,0.12)';
-  for (const s of [1, -1]) { const y0 = h / 2 - s * 3.0 / SCOPE_V * h / 2, y1 = h / 2 - s * 3.8 / SCOPE_V * h / 2; ctx.fillRect(0, Math.min(y0, y1), w, Math.abs(y1 - y0)); }
+  // band for "lamp fully lit" (or the level's target), and the gold ghost trace to match
+  const L = lvl(this), band = L.bands[this.task];
+  if (band) {
+    ctx.fillStyle = 'rgba(255,211,77,0.12)';
+    for (const s of [1, -1]) { const y0 = h / 2 - s * band[0] / SCOPE_V * h / 2, y1 = h / 2 - s * band[1] / SCOPE_V * h / 2; ctx.fillRect(0, Math.min(y0, y1), w, Math.abs(y1 - y0)); }
+  }
+  const ghost = L.ghosts && L.ghosts[this.task];
+  if (ghost) {
+    const E0 = this.emf0(ghost.N, ghost.f);
+    ctx.strokeStyle = 'rgba(255,200,80,0.75)'; ctx.lineWidth = 5; ctx.setLineDash([18, 10]); ctx.beginPath();
+    for (let i = 0; i < SCOPE_N; i++) {
+      const x = i / (SCOPE_N - 1) * w, y = h / 2 - clamp(E0 * Math.sin(2 * Math.PI * ghost.f * 3 * i / (SCOPE_N - 1)) / SCOPE_V, -1, 1) * h / 2 * 0.98;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,200,80,0.9)'; ctx.font = '700 40px system-ui'; ctx.textAlign = 'right'; ctx.fillText(`trace ${ghost.name}`, w - 14, 48); ctx.textAlign = 'left';
+  }
   ctx.shadowColor = '#5dff9d'; ctx.shadowBlur = 12;
   ctx.strokeStyle = '#7dffb0'; ctx.lineWidth = 6; ctx.beginPath();
   for (let i = 0; i < SCOPE_N; i++) {
@@ -1849,15 +2280,34 @@ m5.complete = function (i, msg) {
   this.note = msg;
   sfx.good(); toast(headline(msg), 'good', 2.6);
   if (this.task === 1) hint.show(this.motor.group, [0, 0.16, 0.03]);
-  if (this.task === 3) { this.checkBtn.userData.setOn(true); }
+  if (this.task === lvl(this).angleTask) { this.checkBtn.userData.setOn(true); hint.show(this.checkBtn, [0, 0.08, 0.02]); }
   this.redraw();
+  if ((this.lv || 0) === 2 && this.task >= lvl(this).tasks.length) this.questions();
 };
 m5.checkAngle = async function () {
-  if (this.phase !== 'play' || this.task !== 3) return;
+  const L = lvl(this);
+  if (this.phase !== 'play' || this.task !== L.angleTask) return;
   if (this.motor.value > 0) { toast('Stop the motor first (turn the dial to 0).', 'warn', 2.5); hint.show(this.motor.group, [0, 0.16, 0.03]); return; }
   this.checks++;
   const s = Math.abs(Math.sin(this.angle));
   const deg = ((this.angle * 180 / Math.PI) % 360 + 360) % 360;
+  if (L.want === 'zero') {
+    if (s <= Math.sin(10 * Math.PI / 180)) {
+      this.done[L.angleTask] = true; this.task = L.angleTask + 1;
+      this.note = `Yes! At θ = ${deg.toFixed(0)}° the coil faces straight across the field. The flux through it is biggest, but for a moment it is not changing, so the e.m.f. is zero.`;
+      sfx.great(); toast('Zero e.m.f. position found', 'good', 3);
+      celebrate(this.rotor.getWorldPosition(new V3()), { stars: 0 });
+      this.checkBtn.userData.setOn(false); hint.hide();
+      this.redraw();
+      this.questions();
+    } else {
+      sfx.bad();
+      this.note = `At θ = ${deg.toFixed(0)}° the flux Φ = BA cos θ is still changing as the coil turns, so there would be an e.m.f. Find where cos θ is at its peak (biggest flux).`;
+      toast('There would still be an e.m.f. there', 'bad', 2.2);
+      this.redraw();
+    }
+    return;
+  }
   if (s >= Math.cos(10 * Math.PI / 180)) {
     this.done[3] = true; this.task = 4;
     this.note = `Yes! At θ = ${deg.toFixed(0)}° the coil's plane lies along the field. The flux through it is zero, but it is changing fastest, so the e.m.f. is biggest.`;
@@ -1880,6 +2330,24 @@ m5.questions = async function () {
   this.controls.visible = false;
   const go = askIf(this);
   let ok = 0;
+  const lv = this.lv || 0;
+  if (lv > 0) {
+    const set = M5_QUESTIONS[lv];
+    for (const [k, q] of set.entries()) {
+      ok += await go({ title: `Question ${k + 1} of ${set.length}`, ...q }) ? 1 : 0;
+      if (current !== this) return;
+    }
+    this.phase = 'done';
+    const n = lv === 1 ? (ok === 2 && this.checks <= 2 ? 3 : ok >= 1 ? 2 : 1) : (ok === 2 ? 3 : ok === 1 ? 2 : 1);
+    finishMission(this, n, [
+      { t: lv === 1 ? `Angle checks: ${this.checks}.  Questions right first time: ${ok} of 2.` : `Both traces matched. Questions right first time: ${ok} of 2.`, size: 30 },
+      { t: 'Key ideas', size: 32, bold: true, color: '#ffd34d' },
+      { t: '• Peak e.m.f. E₀ = BANω: proportional to the number of turns and to the speed.', size: 30 },
+      lv === 1 ? { t: '• The e.m.f. is zero when the flux linkage is biggest (coil across the field). r.m.s. = peak / √2.', size: 30 }
+        : { t: '• The frequency depends only on the speed. Different N and ω can give the same peak, but not the same trace.', size: 30 },
+    ]);
+    return;
+  }
   ok += await go({ title: 'Question 1 of 3', q: 'A 200-turn coil of area 0.010 m² turns at 5.0 rev/s in a field of 0.10 T. What is the peak e.m.f.?',
     options: ['6.3 V', '1.0 V', '0.20 V', '63 V'], correct: 0,
     explain: 'ω = 2πf = 31.4 rad/s, so E₀ = BANω = 0.10 × 0.010 × 200 × 31.4 = 6.3 V.',
@@ -1927,24 +2395,40 @@ m5.tick = function (dt, t) {
   if (this.scopeT > 1 / 30) { this.scopeT = 0; this.drawScope(); }
   // bulb, coil glow, hum
   // the filament has thermal lag: it glows with the smoothed power (∝ E²), so it flickers only at low speeds
-  this.heat = (this.heat || 0) + ((emf / 3.4) ** 2 - (this.heat || 0)) * (1 - Math.exp(-dt / 0.12));
-  const lvl = clamp(Math.sqrt(2 * this.heat), 0, 1.3);
-  this.bulbGlass.material.emissiveIntensity = 2.5 * lvl;
-  this.bulbGlow.material.opacity = Math.min(1, lvl);
-  this.bulbLight.intensity = 0.6 * lvl;
-  this.filament.material.color.setRGB(0.33 + lvl, 0.2 + 0.8 * lvl, 0.07 + 0.5 * lvl);
-  this.copper.emissiveIntensity = 0.25 * Math.min(1, lvl);
+  this.heat = (this.heat || 0) + ((emf / this.bulbV) ** 2 - (this.heat || 0)) * (1 - Math.exp(-dt / 0.12));
+  const glo = clamp(Math.sqrt(2 * this.heat), 0, 1.3);
+  this.bulbGlass.material.emissiveIntensity = 2.5 * glo;
+  this.bulbGlow.material.opacity = Math.min(1, glo);
+  this.bulbLight.intensity = 0.6 * glo;
+  this.filament.material.color.setRGB(0.33 + glo, 0.2 + 0.8 * glo, 0.07 + 0.5 * glo);
+  this.copper.emissiveIntensity = 0.25 * Math.min(1, glo);
   this.hum?.set({ vol: Math.min(0.05, 0.004 * Math.abs(this.omega)), freq: 40 + Math.abs(this.omega) * 4 });
   // field dots drift from N to S
   let k = 0;
   for (const [y, z] of this.fieldYZ) for (let n = 0; n < 3; n++) { if (k >= 30) break; const s = (t * 0.3 + n / 3 + k * 0.11) % 1; _p4.set(-0.14 + s * 0.28, y, z); this.fieldDots.set(k++, _p4, Math.sin(s * Math.PI)); }
   this.fieldDots.commit();
   // tasks
-  if (this.phase === 'play') {
+  const lv = this.lv || 0;
+  if (this.phase === 'play' && lv > 0) {
+    const E0 = this.emf0(this.N, f);
+    if (lv === 1 && this.task < 2) {
+      const band = lvl(this).bands[this.task];
+      if (f > 0 && E0 >= band[0] && E0 <= band[1]) this.holdT += dt; else this.holdT = 0;
+      if (this.holdT > 1.5) {
+        if (this.task === 0) { this.f1 = f; this.complete(0, `Fully lit at ${f.toFixed(1)} rev/s: E₀ = BANω = 0.10 × 0.010 × 400 × 2π × ${f.toFixed(1)} = ${E0.toFixed(2)} V.`); }
+        else { this.complete(1, `Night light on at ${f.toFixed(1)} rev/s: E₀ = ${E0.toFixed(2)} V. Half the speed gives half the peak, because E₀ = BANω.`); hint.show(this.motor.group, [0, 0.16, 0.03]); }
+      }
+    } else if (lv === 2 && this.task < 2) {
+      const g = lvl(this).ghosts[this.task], G0 = this.emf0(g.N, g.f);
+      if (f > 0 && Math.abs(E0 - G0) <= 0.15 && Math.abs(f - g.f) <= 0.05) this.holdT += dt; else this.holdT = 0;
+      if (this.holdT > 1.5) this.complete(this.task, `Trace ${g.name} matched: ${g.N} turns at ${g.f.toFixed(1)} rev/s, so E₀ = ${G0.toFixed(2)} V and ${Math.round(g.f * 3)} cycles in 3 s.`);
+    }
+  }
+  if (this.phase === 'play' && lv === 0) {
     if (this.task === 0 && this.turned >= Math.PI * 2 && this.signsSeen.size === 2) {
       this.complete(0, 'One full turn gives one full cycle: the e.m.f. goes positive, then negative. That is alternating current. The faster you wind, the bigger the e.m.f.');
     } else if (this.task === 1) {
-      const E0 = GEN_B * GEN_A * GEN_N * 2 * Math.PI * f;
+      const E0 = this.emf0(this.N, f);
       if (f > 0 && E0 >= 3.0 && E0 <= 3.8) this.holdT += dt; else this.holdT = 0;
       if (this.holdT > 1.5) { this.f1 = f; this.complete(1, `Fully lit at ${f.toFixed(1)} rev/s: E₀ = BANω = 0.10 × 0.010 × 200 × 2π × ${f.toFixed(1)} = ${E0.toFixed(2)} V.`); hint.show(this.motor.group, [0, 0.16, 0.03]); }
     } else if (this.task === 2) {
@@ -1956,13 +2440,37 @@ m5.tick = function (dt, t) {
   if (this.dataT > 0.2 && this.phase === 'play') { this.dataT = 0; this.drawData(); }
 };
 
-// ---------------------------------------------------------------- menu buttons
-missions.forEach((m, i) => {
-  const b = actionButton(`${i + 1}. ${m.short}`, 0.185, 0.14, () => startMission(i), { bg: ['#1f6fb2', '#b9770e', '#8e44ad', '#1e8449', '#c0392b'][i], size: 24, name: `Start ${m.title}` });
-  b.position.set(-0.42 + i * 0.205, 0.0, 0);
-  menuGroup.add(b);
-  missionButtons.push(b);
+const M5_QUESTIONS = [null, [
+  { q: 'The lamp needs a peak of 6.0 V. The coil has 400 turns of area 0.010 m² in a 0.10 T field. At what frequency must it turn?',
+    options: ['2.4 Hz', '15 Hz', '1.2 Hz', '4.8 Hz'], correct: 0,
+    explain: 'ω = E₀ / BAN = 6.0 / (0.10 × 0.010 × 400) = 15 rad/s, so f = ω / 2π = 2.4 Hz.',
+    why: ['', 'That is ω in rad/s. Divide by 2π to get the frequency.', 'That gives a 3.0 V peak: half of what the lamp needs.', 'That would be right for 200 turns. This coil has 400.'] },
+  { q: 'What is the r.m.s. value of an alternating e.m.f. with a peak of 6.0 V?',
+    options: ['4.2 V', '3.0 V', '6.0 V', '8.5 V'], correct: 0,
+    explain: 'For a sine wave, V(r.m.s.) = V₀ / √2 = 6.0 / 1.41 = 4.2 V. A 4.2 V battery would light the lamp just as brightly.',
+    why: ['', 'r.m.s. is the peak divided by √2, not by 2.', 'That is the peak value. The r.m.s. value is smaller.', 'That multiplies by √2. Divide instead.'] },
+], [
+  { q: 'Trace A has a 2.5 V peak at 4.0 Hz. A 200-turn coil at 2.0 Hz gives the same 2.5 V peak. Why is that not a match?',
+    options: ['Its frequency is half, so each cycle takes twice as long', 'Its peak is only half as big', 'It gives direct current', 'It is a match: the peaks are equal'], correct: 0,
+    explain: 'E₀ = BANω gives the same peak for 2N at ω/2, but the frequency depends only on the speed. Half the speed means half as many cycles in 3 s.',
+    why: ['', 'The peaks are equal: 200 × 2.0 = 100 × 4.0.', 'A coil with slip rings always gives a.c.', 'The cycles would be twice as wide, so the traces would not line up.'] },
+  { q: 'An a.c. trace shows 12 complete cycles across 3.0 s. What are its frequency and period?',
+    options: ['4.0 Hz and 0.25 s', '12 Hz and 0.083 s', '0.25 Hz and 4.0 s', '36 Hz and 0.028 s'], correct: 0,
+    explain: 'f = 12 cycles / 3.0 s = 4.0 Hz, and T = 1/f = 0.25 s.',
+    why: ['', 'Divide the 12 cycles by the 3.0 s they take.', 'That is upside down: f is cycles per second.', 'Divide by the time, do not multiply.'] },
+]];
+
+// ---------------------------------------------------------------- the campaign menu
+C = campaign({
+  key: 'field-lab-v3', legacyKey: 'field-lab-v2', parent: menuGroup,
+  chapters: missions.map((m) => ({ short: m.short, levels: m.levels })),
+  colors: ['#1f6fb2', '#b9770e', '#8e44ad', '#1e8449', '#c0392b'],
+  row: { x0: -0.42, dx: 0.205, w: 0.185, h: 0.14 },
+  onHome: () => { drawWelcome(); drawDataSheet(); const up = C.nextUp(); hint.show(C.chapterButtons[up ? up.c : 0], [0, 0.1, 0.02]); },
+  onChapter: (c) => { drawChapter(c); const l = [0, 1, 2].find((k) => C.unlocked(c, k) && C.get(c, k) === 0); hint.show(C.levelButtons[l ?? 0], [0, 0.12, 0.02]); },
+  onPlay: (c, l) => startMission(c, l),
 });
+const missionButtons = C.chapterButtons;
 
 onFrame((dt, t) => { if (current && current.world.visible) current.tick(dt, t); });
 ambience('lab');
@@ -1970,5 +2478,5 @@ openMenu();
 start();
 
 // Test hook (used by the automated browser tests; harmless for players).
-window.lesson = { missions, startMission, openMenu, get current() { return current; }, Q, info, data, input, scene, renderer, THREE, camera,
-  get stars() { return stars; }, speed: 1, panel, toast, missionButtons, nextBtn, menuBtn, restartBtn, app, hint, fx };
+window.lesson = { missions, startMission, openMenu, get current() { return current; }, get campaign() { return C; }, Q, info, data, input, scene, renderer, THREE, camera,
+  get stars() { return C.stars; }, speed: 1, panel, toast, missionButtons, nextBtn, menuBtn, restartBtn, app, hint, fx };
