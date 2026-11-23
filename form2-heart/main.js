@@ -392,7 +392,7 @@ function shownBpm() { return beat.manual ? (L4.bpm || 0) : beat.bpm; }
 
 // ================================================================= selecting parts (levels 2 and 3)
 const mode = { kind: 'idle' };
-const SELECTABLE = (k) => (mode.kind === 'route' && !['TV', 'BV', 'SP', 'SA'].includes(k)) || mode.kind === 'quiz';
+const SELECTABLE = (k) => (mode.kind === 'route' && !['TV', 'BV', 'SP', 'SA'].includes(k)) || mode.kind === 'quiz' || (mode.kind === 'diagnose' && !L5.busy);
 const _lp = new THREE.Vector3();
 for (const k in parts) {
   const pt = parts[k];
@@ -419,6 +419,7 @@ async function flash(k, color = 0xffe066, times = 3) {
 function onPart(k) {
   if (mode.kind === 'route') routePick(k);
   else if (mode.kind === 'quiz') quizPick(k);
+  else if (mode.kind === 'diagnose') diagPick(k);
 }
 
 // ================================================================= level 1: label the heart
@@ -751,6 +752,85 @@ function l4Start() {
 }
 function l4Stop() { L4.on = false; L4.target = null; beat.manual = false; }
 
+// ================================================================= level 5: emergency cases (a leaking valve)
+// Blood leaks backwards through one faulty valve. A leak makes a whooshing sound (a murmur).
+// Watch where blood flows the wrong way and choose that valve.
+const CASES = [
+  { v: 'BV', who: 'Mrs Sibanda, 58', story: 'gets out of breath easily. The doctor hears a whooshing murmur when the ventricles squeeze.', from: 'LV', to: 'LA', red: true, when: 'squeeze',
+    why: 'The bicuspid valve should close when the left ventricle squeezes. It leaks, so oxygenated blood is pushed back into the left atrium.' },
+  { v: 'TV', who: 'Mr Banda, 44', story: 'has swollen ankles and feels tired. There is a murmur on the right side of the heart.', from: 'RV', to: 'RA', red: false, when: 'squeeze',
+    why: 'The tricuspid valve should close when the right ventricle squeezes. It leaks, so deoxygenated blood goes back into the right atrium.' },
+  { v: 'SA', who: 'Tatenda, 17', story: 'is a runner who suddenly tires quickly. The murmur is heard while the heart relaxes.', from: 'SA', to: 'LV', red: true, when: 'relax',
+    why: 'The aortic semilunar valve should stop blood falling back from the aorta. It leaks, so blood flows back into the left ventricle while the heart relaxes.' },
+];
+const L5 = { order: [], i: 0, tries: 0, busy: false, case: null };
+const LEAK_N = 14;
+const leakCells = [new THREE.InstancedMesh(flowCellGeo, mat(0xf0524a, { roughness: 0.3, emissive: 0x6a1410 }), LEAK_N), new THREE.InstancedMesh(flowCellGeo, mat(0x6f8ff0, { roughness: 0.3, emissive: 0x18286a }), LEAK_N)];
+leakCells.forEach((m) => { m.count = 0; m.frustumCulled = false; noHit(m); heart.add(m); });
+{
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
+  let murmur = 0;
+  kit.tick((dt, t) => {
+    const cs = L5.case;
+    if (mode.kind !== 'diagnose' || !cs) { leakCells.forEach((m) => { m.count = 0; }); return; }
+    const im = leakCells[cs.red ? 0 : 1]; leakCells[cs.red ? 1 : 0].count = 0;
+    // leak window: while the ventricles squeeze (phase 0.18-0.45) or while the heart relaxes (0.5-0.95)
+    const ph = beat.phase;
+    const w0 = cs.when === 'squeeze' ? 0.18 : 0.5, w1 = cs.when === 'squeeze' ? 0.45 : 0.95;
+    const on = ph >= w0 && ph <= w1, f = on ? (ph - w0) / (w1 - w0) : 0;
+    if (on && murmur <= 0) { murmur = 0.5; sfx.tone(180, (w1 - w0) * 60 / beat.bpm, 'sawtooth', 0.025, 120); }
+    murmur -= dt;
+    _a.copy(C(cs.from)).add(new THREE.Vector3(0, 0, 0.05)); _b.copy(C(cs.to)).add(new THREE.Vector3(0, 0, 0.05));
+    for (let i = 0; i < LEAK_N; i++) {
+      const k = THREE.MathUtils.clamp(f * 1.4 - (i / LEAK_N) * 0.4, 0, 1);
+      _p.lerpVectors(_a, _b, k); _p.x += Math.sin(i * 2.1 + t * 3) * 0.008; _p.y += Math.cos(i * 1.7 + t * 2.5) * 0.006;
+      _s.setScalar(on && k > 0 && k < 1 ? 1.7 : 0.001);
+      im.setMatrixAt(i, _m.compose(_p, _q.setFromEuler(_e.set(i, t + i, 0)), _s));
+    }
+    im.count = LEAK_N; im.instanceMatrix.needsUpdate = true;
+  });
+}
+function l5Draw(extra = '') {
+  const cs = L5.case;
+  board.draw({
+    heading: 'Level 5: Emergency cases', level: `Patient ${L5.i + 1} of ${CASES.length}`,
+    body: [`**${cs.who}** ${cs.story}`,
+      `Watch the blood in the heart closely. Somewhere it flows **the wrong way**. ${howTo(kit.kind).choose[0].toUpperCase() + howTo(kit.kind).choose.slice(1)} the **valve** that is leaking.`, extra],
+    footer: 'Valves are the small white flaps. They let blood flow only one way. 20 points for a diagnosis first time.',
+  });
+}
+function l5Start() {
+  mode.kind = 'diagnose'; resetSpin();
+  hideLabels(); cell.visible = false;
+  Object.values(parts).forEach((p) => { p.group.userData.interactive.name = ''; });
+  L5.order = kit.shuffle(CASES.map((_, i) => i)); L5.i = 0;
+  l5Load();
+}
+function l5Load() { L5.case = CASES[L5.order[L5.i]]; L5.tries = 0; L5.busy = false; l5Draw(); }
+async function diagPick(k) {
+  if (L5.busy) return;
+  const cs = L5.case;
+  if (k === cs.v) {
+    L5.busy = true;
+    const run = kit.newRun();
+    score.add(L5.tries === 0 ? 20 : L5.tries === 1 ? 8 : 3, heart.localToWorld(C(k).add(new THREE.Vector3(0, 0.06, 0.06))));
+    say(`Correct: the ${parts[k].name.toLowerCase()} is leaking.`, 'good', 4);
+    l5Draw(`**Diagnosis correct.** ${cs.why}`);
+    await flash(k, 0x2ecc71, 2);
+    L5.case = null;
+    await wait(3.4);
+    if (!kit.isRun(run)) return;
+    L5.i++;
+    if (L5.i >= CASES.length) { mode.kind = 'done'; flow.complete(['Valves keep blood flowing one way: atria to ventricles, ventricles to arteries. A leaking valve lets blood flow back.']); return; }
+    l5Load();
+  } else {
+    L5.tries++; score.streak = 0;
+    const isValve = ['TV', 'BV', 'SP', 'SA'].includes(k);
+    say(isValve ? `The ${parts[k].name.toLowerCase()} is working. Look again: where do the cells go backwards?` : `That is the ${parts[k].name.toLowerCase()}. Choose a valve, one of the small white flaps.`, 'bad', 4);
+    if (L5.tries >= 2) l5Draw(`Hint: the leaking blood flows from the **${parts[cs.from === 'SA' ? 'AO' : cs.from].name.toLowerCase()}** back into the **${parts[cs.to].name.toLowerCase()}**.`);
+  }
+}
+
 // ================================================================= levels
 const flow = kit.levelFlow({
   key: 'form2-heart',
@@ -758,22 +838,31 @@ const flow = kit.levelFlow({
   intro: {
     heading: 'Heartbeat: the heart and circulation',
     body: ['Your heart beats about 72 times a minute, pushing blood through two circuits: to the lungs and to the body.',
-      'Label the parts of the heart, guide a blood cell round the double circulation, test yourself, then keep the heart pumping while the body exercises.',
+      'Label the parts of the heart, guide a blood cell round the double circulation, test yourself, keep the heart pumping during exercise, then diagnose leaking valves.',
       'Turn the heart round on its turntable (drag the ring) to see it from every side.',
       'Choose a level on the panel to your left to begin.'],
     footer: 'Form 2 Integrated Science: transport systems in animals.',
   },
   levels: [
-    { title: 'Label the heart', short: 'Label it', max: 80, start: l1Start },
-    { title: 'Pump the blood round the body', short: 'Pump it', max: 190, start: l2Start },
-    { title: 'Heart quiz', short: 'Quiz', max: 60, start: l3Start },
-    { title: 'Exercise: keep the heart pumping', short: 'Exercise', max: 60, start: l4Start, stop: l4Stop },
+    { title: 'Label the heart', short: 'Label it', max: 80, start: l1Start,
+      story: { chapter: 'First day on the ward', intro: ['Welcome, junior doctor! I am Dr Moyo. Before you see patients, you need to know the heart inside out.', 'Put each label on the right part. Remember: the heart’s right side is on your left.'], outro: ['Well done. You know your way around the heart.'] } },
+    { title: 'Pump the blood round the body', short: 'Pump it', max: 190, start: l2Start,
+      story: { chapter: 'Follow the blood', intro: ['Now follow one blood cell all the way round the body and the lungs.', 'In each full lap the blood passes through the heart twice. That is double circulation.'], outro: ['A perfect lap: body, heart, lungs, heart, body.'] } },
+    { title: 'Heart quiz', short: 'Quiz', max: 60, start: l3Start,
+      story: { chapter: 'Ward round questions', intro: ['On a ward round the senior doctors fire quick questions. Ready?'], outro: ['Sharp answers! You are ready to meet patients.'] } },
+    { title: 'Exercise: keep the heart pumping', short: 'Exercise', max: 60, start: l4Start, stop: l4Stop,
+      story: { chapter: 'The fitness test', intro: ['A patient is on the treadmill for a fitness test, and you control the heart’s pacemaker.', 'Keep the heart rate in the target band while the patient rests, walks and then runs.'], outro: ['Great pacing. Working muscles need more oxygen, so the heart beats faster.'] } },
+    { title: 'Emergency cases: find the leaking valve', short: 'Emergency', max: 60, start: l5Start, stop: () => { L5.case = null; },
+      story: { chapter: 'Emergency cases', intro: ['Three patients have just arrived. Each has a valve that leaks.', 'Watch the blood carefully and listen for the whoosh. Find where blood flows the wrong way, then choose that valve.'], outro: ['Three correct diagnoses. Valves stop blood flowing backwards; when one leaks, the heart has to work much harder.'] } },
   ],
+  guide: kit.guide({ name: 'Dr Tafadzwa Moyo', role: 'Heart doctor', look: { skin: '#5e3a24', hair: 'short', glasses: true, shirt: '#8e3b46', accent: '#7b2d3a' } }),
+  prologue: ['Hello, I am Dr Moyo, a heart doctor at the hospital.', 'You are starting your training with me. By the end you will treat real emergencies.', 'Choose Chapter 1 on the panel to your left.'],
+  ending: ['You have finished your training. Congratulations, Doctor!', 'Your heart beats about 100,000 times a day. Look after it.'],
 });
 // before a level starts the labels wait on the table and the pins are hidden
 pins.forEach((p) => { p.visible = false; });
 flow.showIntro();
-kit.onKind(() => { if (mode.kind === 'label') l1Draw(); else if (mode.kind === 'route') l2Draw(); else if (mode.kind === 'quiz') l3Draw(); else if (mode.kind === 'pump') l4Draw(); });
+kit.onKind(() => { if (mode.kind === 'label') l1Draw(); else if (mode.kind === 'route') l2Draw(); else if (mode.kind === 'quiz') l3Draw(); else if (mode.kind === 'pump') l4Draw(); else if (mode.kind === 'diagnose' && L5.case) l5Draw(); });
 kit.start();
 
-window.game = { kit, flow, parts, cards, pins, mode, L1, L2, L3, L4, STAGES, ROUTE, QUIZ, board, heart, cell, bulb, beat, spinRing, setSpin, squeeze, monitor, speed: 1 };
+window.game = { kit, flow, parts, cards, pins, mode, L1, L2, L3, L4, L5, CASES, STAGES, ROUTE, QUIZ, board, heart, cell, bulb, beat, spinRing, setSpin, squeeze, monitor, speed: 1 };

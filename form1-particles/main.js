@@ -78,6 +78,10 @@ const SUBSTANCES = {
     segs: [[0, 20, -20, 0, 'solid'], [20, 60, 0, 0, 'melt'], [60, 160, 0, 100, 'liquid'], [160, 260, 100, 100, 'boil'], [260, 300, 100, 140, 'gas']],
     mp: 0, bp: 100,
   },
+  // mystery samples (level 4): their names stay hidden until identified
+  ethanol: { name: 'Ethanol', color: 0x9fd3e6, gasColor: 0xcfeaf4, segs: [[0, 40, 10, 78, 'liquid'], [40, 140, 78, 78, 'boil'], [140, 170, 78, 120, 'gas']], mp: -114, bp: 78 },
+  wax: { name: 'Paraffin wax', color: 0xe8d9a8, gasColor: 0xf4ecd0, segs: [[0, 25, 20, 55, 'solid'], [25, 75, 55, 55, 'melt'], [75, 130, 55, 130, 'liquid']], mp: 55, bp: 370 },
+  naphthalene: { name: 'Naphthalene', color: 0xcfd6dc, gasColor: 0xe6eaee, segs: [[0, 40, 20, 80, 'solid'], [40, 90, 80, 80, 'melt'], [90, 125, 80, 135, 'liquid']], mp: 80, bp: 218 },
   iodine: {
     name: 'Iodine', color: 0x5b2c6f, gasColor: 0xb57edc,
     segs: [[0, 20, 20, 35, 'solid'], [20, 120, 35, 60, 'sublime'], [120, 140, 60, 70, 'gas']],
@@ -112,7 +116,7 @@ function stateName(c) {
 }
 function setSubstance(key, Q) {
   sim.sub = SUBSTANCES[key]; sim.Q = Q; sim.heater = 0; sim.history = []; sim.histT = 0;
-  chamberLabel.userData.draw(sim.sub.name);
+  chamberLabel.userData.draw(sim.mystery ? sim.mystery : sim.sub.name);
   const c = counts(Q);
   // place particles straight into their states
   for (const p of P) {
@@ -345,7 +349,7 @@ function drawGraph(clear = false) {
   ctx.fillStyle = '#e8ecee'; ctx.font = 'bold 30px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillText('Temperature (°C) against time', 14, 12);
   // the states as coloured bands behind the graph
-  if (!sim.sub.sublimes) {
+  if (!sim.sub.sublimes && !sim.mystery) {
     for (const [a, b, col, name] of [[T_MIN, sim.sub.mp, 'rgba(90,160,220,0.16)', 'solid'], [sim.sub.mp, sim.sub.bp, 'rgba(70,190,160,0.13)', 'liquid'], [sim.sub.bp, T_MAX, 'rgba(230,140,80,0.14)', 'gas']]) {
       ctx.fillStyle = col; ctx.fillRect(L, gy(b), W - Rm - L, gy(a) - gy(b));
       ctx.fillStyle = 'rgba(232,236,238,0.55)'; ctx.font = '20px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(name, W - Rm - 8, (gy(a) + gy(b)) / 2);
@@ -353,7 +357,7 @@ function drawGraph(clear = false) {
   }
   ctx.strokeStyle = 'rgba(232,236,238,0.12)'; ctx.lineWidth = 2; ctx.font = '22px system-ui'; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
   for (let T = T_MIN; T <= T_MAX; T += 20) { ctx.beginPath(); ctx.moveTo(L, gy(T)); ctx.lineTo(W - Rm, gy(T)); ctx.stroke(); ctx.fillStyle = '#a9b8c3'; ctx.fillText(String(T), L - 10, gy(T)); }
-  if (!sim.sub.sublimes) {
+  if (!sim.sub.sublimes && !sim.mystery) {
     ctx.setLineDash([10, 8]); ctx.strokeStyle = '#e0a83a';
     for (const [T, n] of [[sim.sub.mp, 'melting point'], [sim.sub.bp, 'boiling point']]) {
       ctx.beginPath(); ctx.moveTo(L, gy(T)); ctx.lineTo(W - Rm, gy(T)); ctx.stroke();
@@ -400,7 +404,7 @@ function stepHeat(dt) {
   if (!sim.heater) return;
   const before = sim.Q;
   sim.Q = THREE.MathUtils.clamp(sim.Q + sim.heater * sim.rate * dt, 0, QMAX());
-  if (sim.Q === before && !edgeWarned && mode.kind === 'heat') {
+  if (sim.Q === before && !edgeWarned && heatMode()) {
     edgeWarned = true;
     say(sim.heater > 0 ? 'The heater is at its highest temperature. Try COOL.' : 'The cooler cannot go any colder. Try HEAT.', 'info');
   }
@@ -429,7 +433,7 @@ noHit(slider);
 knob.traverse((o) => { o.userData.noHit = false; });
 kit.draggable(knob, {
   name: 'Heater: slide left to cool, right to heat',
-  enabled: () => mode.kind === 'heat' && chamber.visible,
+  enabled: () => heatMode() && chamber.visible,
   // the drag point is found on the slider's own plane, then only its sideways position is used
   plane: () => { slider.updateMatrixWorld(); const n = new THREE.Vector3(0, 0, 1).transformDirection(slider.matrixWorld); return new THREE.Plane().setFromNormalAndCoplanarPoint(n, slider.getWorldPosition(new THREE.Vector3())); },
   onMove: (pt) => {
@@ -475,7 +479,7 @@ const heatBtns = ['COOL', 'OFF', 'HEAT'].map((t, i) => {
   return b;
 });
 function setHeater(h, quiet = false) {
-  if (mode.kind !== 'heat') return;
+  if (!heatMode()) return;
   if (h !== sim.heater) edgeWarned = false;
   sim.heater = h; paintHeater();
   if (h && !quiet) sfx.tone(h > 0 ? 300 : 900, 0.3, 'sine', 0.06, h > 0 ? 600 : 450);
@@ -509,6 +513,7 @@ function hideRow() { ansBtns.forEach((b) => { b.visible = false; }); heatBtns.fo
 
 // ================================================================= level 1: heat and cool
 const mode = { kind: 'idle' };
+const heatMode = () => mode.kind === 'heat' || (mode.kind === 'mystery' && L4.phase === 'heat');
 const L1 = {
   missions: [
     { text: 'Melt the ice: turn it all into liquid water.', done: () => sim.Q >= 60 && sim.Q < 160 },
@@ -527,7 +532,7 @@ const L1 = {
   i: 0, phase: 'mission', tries: 0,
 };
 function l1Start() {
-  mode.kind = 'heat';
+  mode.kind = 'heat'; sim.mystery = null;
   showChamber(true); showSorting(false);
   setSubstance('water', 0);
   L1.i = 0; L1.phase = 'mission';
@@ -605,7 +610,7 @@ const CHANGES = {
 const CH_KEYS = Object.keys(CHANGES);
 const L2 = { rounds: [], i: 0, tries: 0, answered: false };
 function l2Start() {
-  mode.kind = 'name';
+  mode.kind = 'name'; sim.mystery = null;
   showChamber(true); showSorting(false);
   L2.rounds = kit.shuffle(CH_KEYS); L2.i = 0;
   showAnswers(CH_KEYS.map((k) => CHANGES[k].label), l2Answer, 0.168, 'bold 26px system-ui, sans-serif');
@@ -815,6 +820,7 @@ function l3Draw() {
   });
 }
 function l3Start() {
+  sim.mystery = null;
   mode.kind = 'sort';
   showChamber(false); showSorting(true); hideRow();
   L3.done = 0;
@@ -823,6 +829,68 @@ function l3Start() {
   layoutJars();
   jars.forEach((j) => kit.storeHome(j));
   l3Draw();
+}
+
+// ================================================================= level 4: mystery samples
+// Heat an unlabelled sample, read the flat parts of the graph, and match them to the data table.
+const MYST_OPTS = ['water', 'ethanol', 'wax', 'naphthalene', 'iodine'];
+const MYST_TABLE = { water: '0 °C / 100 °C', ethanol: '−114 °C / 78 °C', wax: '55 °C / about 370 °C', naphthalene: '80 °C / 218 °C', iodine: 'turns straight to gas when warmed' };
+const L4 = { samples: [], i: 0, tries: 0, phase: 'heat', busy: false };
+function l4Start() {
+  mode.kind = 'mystery';
+  showChamber(true); showSorting(false);
+  L4.samples = kit.shuffle(['ethanol', 'wax', 'naphthalene']); L4.i = 0;
+  l4Load();
+}
+function l4Load() {
+  const key = L4.samples[L4.i];
+  L4.tries = 0; L4.phase = 'heat'; L4.busy = false;
+  sim.mystery = `Sample ${'ABC'[L4.i]}`;
+  setSubstance(key, 0);
+  showHeaterButtons();
+  l4Draw();
+}
+function l4Draw(extra = '') {
+  board.draw({
+    heading: 'Level 4: Mystery samples', level: `Sample ${'ABC'[Math.min(L4.i, 2)]} of C`,
+    body: [L4.phase === 'heat' ? 'Heat the sample all the way up with the slider. Watch the graph: a **flat part** means the substance is melting or boiling at that temperature.' : 'Which substance is it? Compare the flat parts of your graph with the table, then choose on the buttons.',
+      extra],
+    items: MYST_OPTS.map((k) => ({ text: k === 'iodine' ? `${SUBSTANCES[k].name}: ${MYST_TABLE[k]}` : `${SUBSTANCES[k].name}: melts / boils at ${MYST_TABLE[k]}`, state: 'todo' })),
+    footer: 'A pure substance melts and boils at fixed temperatures, so these numbers identify it.',
+  });
+}
+let l4Redraw = 0;
+function l4Tick(dt) {
+  if (mode.kind !== 'mystery' || L4.phase !== 'heat') return;
+  l4Redraw -= dt; if (l4Redraw <= 0) { l4Redraw = 0.3; l4Draw(`Now: **${Math.round(tempOf(sim.Q))} °C**.`); }
+  if (sim.Q >= QMAX() - 0.5) {
+    // heated right through: now identify it
+    L4.phase = 'answer'; sim.heater = 0; paintHeater();
+    say('Heated all the way. Now identify the sample.', 'info');
+    showAnswers(['Water', 'Ethanol', 'Wax', 'Naphthalene', 'Iodine'], l4Answer, 0.15, 'bold 24px system-ui, sans-serif');
+    l4Draw();
+  }
+}
+async function l4Answer(k) {
+  if (mode.kind !== 'mystery' || L4.phase !== 'answer' || L4.busy) return;
+  const key = L4.samples[L4.i], sub = SUBSTANCES[key];
+  if (MYST_OPTS[k] === key) {
+    L4.busy = true;
+    const run = kit.newRun();
+    score.add(L4.tries === 0 ? 20 : L4.tries === 1 ? 8 : 3, row.position.clone().add(new THREE.Vector3(0, 0.15, 0)));
+    sim.mystery = null; chamberLabel.userData.draw(sub.name); drawGraph();
+    const flat = key === 'ethanol' ? `it boiled at ${sub.bp} °C` : `it melted at ${sub.mp} °C`;
+    say(`Yes: ${sub.name.toLowerCase()}. The graph went flat because ${flat}.`, 'good', 5);
+    l4Draw(`**Correct.** The flat part shows ${flat}.`);
+    await wait(3.2);
+    if (!kit.isRun(run)) return;
+    L4.i++;
+    if (L4.i >= L4.samples.length) { mode.kind = 'done'; hideRow(); flow.complete(['A pure substance has a sharp melting point and boiling point: they are like its fingerprint.']); return; }
+    l4Load();
+  } else {
+    L4.tries++; score.streak = 0;
+    say(`Not ${SUBSTANCES[MYST_OPTS[k]].name.toLowerCase()}. Find the temperature where the graph went flat and look for it in the table.`, 'bad', 5);
+  }
 }
 
 function showChamber(v) { chamber.visible = thermo.visible = easel.visible = row.visible = v; }
@@ -835,15 +903,23 @@ const flow = kit.levelFlow({
   intro: {
     heading: 'Particle Lab: States of Matter',
     body: ['Everything is made of tiny particles. In this lab you can see them.',
-      'Heat and cool a substance and watch its particles change state, name each change, then sort substances into **elements**, **compounds** and **mixtures**.',
+      'Heat and cool a substance and watch its particles change state, name each change, sort substances into **elements**, **compounds** and **mixtures**, then identify mystery samples.',
       'Choose a level on the panel to your left to begin.'],
     footer: 'Form 1 Integrated Science: matter and the kinetic theory.',
   },
   levels: [
-    { title: 'Heat and cool', short: 'Heat & cool', max: 140, start: l1Start, stop: () => { sim.heater = 0; } },
-    { title: 'Name the change', short: 'Name it', max: 75, start: l2Start, stop: () => { sim.heater = 0; sim.target = null; } },
-    { title: 'Element, compound or mixture', short: 'Sort it', max: 80, start: l3Start },
+    { title: 'Heat and cool', short: 'Heat & cool', max: 140, start: l1Start, stop: () => { sim.heater = 0; },
+      story: { chapter: 'Testing the chamber', intro: ['First we test the chamber with plain water.', 'Melt the ice, boil it, then bring it back to ice. Keep an eye on the thermometer.'], outro: ['The chamber works. Did you see the temperature stand still while the state changed? Remember that.'] } },
+    { title: 'Name the change', short: 'Name it', max: 75, start: l2Start, stop: () => { sim.heater = 0; sim.target = null; },
+      story: { chapter: 'Practice for the visitors', intro: ['The visitors will ask what each change is called. Let us practise.', 'I will run a change in the chamber. You name it.'], outro: ['Great: you know all five changes of state.'] } },
+    { title: 'Element, compound or mixture', short: 'Sort it', max: 80, start: l3Start,
+      story: { chapter: 'The mixed-up store room', intro: ['Oh no! Someone knocked the jars off the store room shelf and the labels fell off.', 'Look at the particles in each jar and put it on the right tray: element, compound or mixture.'], outro: ['The store room is tidy again. Thank you!'] } },
+    { title: 'Mystery samples', short: 'Mystery', max: 60, start: l4Start, stop: () => { sim.heater = 0; },
+      story: { chapter: 'The unlabelled delivery', intro: ['One last job. A delivery came with three samples, and nobody wrote their names on them.', 'Heat each one. Where the graph goes flat it is melting or boiling. Read that temperature and check the table on the board.'], outro: ['All three identified. Melting and boiling points are like a fingerprint for a pure substance.'] } },
   ],
+  guide: kit.guide({ name: 'Rudo Chari', role: 'Lab technician', look: { skin: '#7a4a2e', hair: 'braids', shirt: '#7a3b6e', accent: '#2b5d80' } }),
+  prologue: ['Mhoro! Welcome to the Harare Science Centre. I am Rudo, the lab technician.', 'Our particle chamber lets us see the tiny particles that everything is made of.', 'A school group visits tomorrow and I need an assistant who understands matter. Choose Chapter 1 on the panel to your left.'],
+  ending: ['You have earned your place as my lab assistant. The visitors are going to love it!', 'Come back any time and try to beat your best score.'],
 });
 showSorting(false); hideRow();
 setSubstance('water', 0);
@@ -878,9 +954,9 @@ kit.tick((dt) => {
       drawGraph();
     }
   }
-  l1Tick(dt); l2Tick();
+  l1Tick(dt); l2Tick(); l4Tick(dt);
 });
 kit.start();
 
 // Test hook (used by the automated browser test; harmless for players).
-window.game = { kit, flow, sim, counts, tempOf, L1, L2, L3, jars, trays, heatBtns, ansBtns, mode, CHANGES, CH_KEYS, board, setSubstance, slider, knob, SL_HALF, speed: 1 };
+window.game = { kit, flow, sim, counts, tempOf, L1, L2, L3, jars, trays, heatBtns, ansBtns, mode, CHANGES, CH_KEYS, board, setSubstance, slider, knob, SL_HALF, L4, MYST_OPTS, SUBSTANCES, speed: 1 };

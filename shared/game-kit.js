@@ -844,7 +844,106 @@ export function createGame(opts = {}) {
   // ---------------------------------------------------------------- levels and the menu pod
   // levels: [{ title, short, max, start(), stop() }]. A pod of big buttons on the left of the
   // table chooses a level; complete(text) shows the level result with stars.
-  function levelFlow({ key, levels, board: b, intro, podPos = new THREE.Vector3(-0.53, 0.98, -0.36), podYaw = 0.9 }) {
+  // ---------------------------------------------------------------- story guide
+  // A friendly character on a small screen beside the board tells the story between levels.
+  // guide({ name, role, look: { skin, hair: 'short'|'bun'|'braids'|'bald', coat, shirt, glasses, accent } })
+  // .play(lines) queues speech (each line is typed out, then the next follows; press the panel to skip on)
+  // .chapter(text) sets the strip above the speech.
+  function guide({ name, role, look = {}, pos = new THREE.Vector3(1.12, 1.6, -1.38), yaw = -0.42 }) {
+    const L = { skin: '#7a4a2e', hair: 'short', hairCol: '#1d1a18', coat: '#e8e6e0', shirt: '#2b5d80', glasses: false, accent: '#2b5d80', ...look };
+    const W = 0.56, H = 0.3;
+    const g = new THREE.Group(); g.position.copy(pos); g.rotation.y = yaw;
+    const frame = mesh(new THREE.BoxGeometry(W + 0.03, H + 0.03, 0.03), mat(0x2a3138, { roughness: 0.45, metalness: 0.2 }), 0, 0, -0.018);
+    const p = canvasPlane(W, H, 1400);
+    g.add(frame, p.mesh);
+    const pole = mat(0x8d969e, { metalness: 0.7, roughness: 0.35 });
+    g.add(mesh(new THREE.CylinderGeometry(0.014, 0.014, pos.y - H / 2, 10), pole, 0, -H / 2 - (pos.y - H / 2) / 2, -0.03));
+    g.add(mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.02, 24), pole, 0, -pos.y + 0.01, -0.03));
+    scene.add(g);
+    const st = { queue: [], line: '', shown: 0, hold: 0, chapter: '', talking: false, blink: 0, mouth: 0, dirty: true };
+    function face(ctx, x, y, r, talking, blink) {
+      // background disc
+      const bg = ctx.createRadialGradient(x, y - r * 0.2, r * 0.2, x, y, r);
+      bg.addColorStop(0, L.accent); bg.addColorStop(1, '#16202a');
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+      // shoulders: lab coat over a shirt
+      ctx.fillStyle = L.coat; ctx.beginPath(); ctx.ellipse(x, y + r * 1.05, r * 0.85, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = L.shirt; ctx.beginPath(); ctx.moveTo(x - r * 0.2, y + r * 0.5); ctx.lineTo(x + r * 0.2, y + r * 0.5); ctx.lineTo(x, y + r * 0.95); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = L.skin; ctx.fillRect(x - r * 0.14, y + r * 0.2, r * 0.28, r * 0.32);
+      // hair behind the head
+      ctx.fillStyle = L.hairCol;
+      if (L.hair === 'braids') { for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + sx * r * 0.36, y + r * 0.1, r * 0.16, r * 0.42, 0, 0, Math.PI * 2); ctx.fill(); } }
+      if (L.hair === 'bun') { ctx.beginPath(); ctx.arc(x, y - r * 0.62, r * 0.2, 0, Math.PI * 2); ctx.fill(); }
+      // head and ears
+      ctx.fillStyle = L.skin;
+      for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + sx * r * 0.36, y - r * 0.05, r * 0.07, r * 0.1, 0, 0, Math.PI * 2); ctx.fill(); }
+      ctx.beginPath(); ctx.ellipse(x, y - r * 0.08, r * 0.35, r * 0.43, 0, 0, Math.PI * 2); ctx.fill();
+      // hair on top
+      ctx.fillStyle = L.hairCol;
+      if (L.hair !== 'bald') { ctx.beginPath(); ctx.ellipse(x, y - r * 0.33, r * 0.37, r * 0.22, 0, Math.PI, Math.PI * 2); ctx.fill(); if (L.hair !== 'short') { ctx.beginPath(); ctx.ellipse(x, y - r * 0.36, r * 0.36, r * 0.17, 0, 0, Math.PI * 2); ctx.fill(); } }
+      // eyes, brows, mouth
+      const ey = y - r * 0.1;
+      for (const sx of [-1, 1]) {
+        if (blink) { ctx.strokeStyle = '#1d1a18'; ctx.lineWidth = r * 0.03; ctx.beginPath(); ctx.moveTo(x + sx * r * 0.15 - r * 0.06, ey); ctx.lineTo(x + sx * r * 0.15 + r * 0.06, ey); ctx.stroke(); }
+        else { ctx.fillStyle = '#f3f2ee'; ctx.beginPath(); ctx.ellipse(x + sx * r * 0.15, ey, r * 0.07, r * 0.05, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#1d1a18'; ctx.beginPath(); ctx.arc(x + sx * r * 0.15, ey + r * 0.005, r * 0.032, 0, Math.PI * 2); ctx.fill(); }
+        ctx.strokeStyle = L.hairCol; ctx.lineWidth = r * 0.03; ctx.beginPath(); ctx.moveTo(x + sx * r * 0.08, ey - r * 0.1); ctx.quadraticCurveTo(x + sx * r * 0.15, ey - r * 0.14, x + sx * r * 0.23, ey - r * 0.1); ctx.stroke();
+      }
+      if (L.glasses) { ctx.strokeStyle = '#2a3138'; ctx.lineWidth = r * 0.022; for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(x + sx * r * 0.15, ey, r * 0.1, 0, Math.PI * 2); ctx.stroke(); } ctx.beginPath(); ctx.moveTo(x - r * 0.05, ey); ctx.lineTo(x + r * 0.05, ey); ctx.stroke(); }
+      ctx.fillStyle = 'rgba(60,30,20,0.35)'; ctx.beginPath(); ctx.ellipse(x, y + r * 0.04, r * 0.04, r * 0.03, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#5a2620';
+      if (talking) { ctx.beginPath(); ctx.ellipse(x, y + r * 0.17, r * 0.09, r * 0.06, 0, 0, Math.PI * 2); ctx.fill(); }
+      else { ctx.strokeStyle = '#5a2620'; ctx.lineWidth = r * 0.03; ctx.beginPath(); ctx.arc(x, y + r * 0.1, r * 0.11, 0.25 * Math.PI, 0.75 * Math.PI); ctx.stroke(); }
+      ctx.restore();
+    }
+    function draw() {
+      const { ctx, c } = p; const Wp = c.width, Hp = c.height, k = Wp / 784;
+      ctx.fillStyle = '#1f2b35'; ctx.fillRect(0, 0, Wp, Hp);
+      ctx.fillStyle = L.accent; ctx.fillRect(0, 0, Wp, 58 * k);
+      ctx.fillStyle = '#f3f2ee'; ctx.font = `bold ${30 * k}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillText(st.chapter || `${name} · ${role}`, 18 * k, 30 * k);
+      face(ctx, 112 * k, 230 * k, 92 * k, st.talking && st.mouth > 0.5, st.blink > 0);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#e4e8ea'; ctx.font = `bold ${24 * k}px system-ui, sans-serif`; ctx.fillText(name, 112 * k, 350 * k);
+      ctx.fillStyle = '#b4c1ca'; ctx.font = `${20 * k}px system-ui, sans-serif`; ctx.fillText(role, 112 * k, 378 * k);
+      // speech
+      ctx.fillStyle = '#e4e8ea'; ctx.textBaseline = 'top'; ctx.font = `${32 * k}px system-ui, sans-serif`;
+      wrapText(ctx, st.line.slice(0, Math.floor(st.shown)), 230 * k, 80 * k, Wp - 250 * k, 41 * k);
+      if (st.queue.length && st.shown >= st.line.length) { ctx.fillStyle = '#e0a83a'; ctx.textAlign = 'right'; ctx.font = `bold ${22 * k}px system-ui, sans-serif`; ctx.fillText('more ▸', Wp - 20 * k, Hp - 34 * k); }
+      p.update();
+    }
+    function next() {
+      if (!st.queue.length) { st.talking = false; st.dirty = true; return; }
+      st.line = st.queue.shift(); st.shown = 0; st.talking = true;
+      st.hold = Math.max(3, st.line.length / 16);
+      st.dirty = true;
+    }
+    let tAcc = 0;
+    tickers.push((dt) => {
+      if (!g.visible) return;
+      tAcc += dt;
+      if (st.talking) {
+        const before = Math.floor(st.shown);
+        st.shown = Math.min(st.line.length, st.shown + dt * 45);
+        if (Math.floor(st.shown) !== before) { st.dirty = true; if (Math.floor(st.shown) % 4 === 0 && st.shown < st.line.length && audio && audio.state === 'running') tone(260 + Math.random() * 80, 0.04, 'triangle', 0.025); }
+        st.mouth = st.shown < st.line.length ? (Math.sin(tAcc * 22) > 0 ? 1 : 0) : 0;
+        if (st.shown >= st.line.length) { st.hold -= dt; if (st.hold <= 0) next(); }
+      }
+      st.blink = st.blink > 0 ? st.blink - dt : (Math.random() < dt * 0.3 ? 0.14 : 0);
+      if (st.dirty || st.blink > 0 || st.talking) { if (tAcc > 0.06 || st.dirty) { draw(); tAcc = 0; st.dirty = false; } }
+    });
+    const api = {
+      group: g, state: st,
+      play(lines, { chapter } = {}) { if (chapter != null) st.chapter = chapter; st.queue = [].concat(lines).filter(Boolean); next(); },
+      chapter(t) { st.chapter = t; st.dirty = true; },
+      skip() { if (st.shown < st.line.length) st.shown = st.line.length; else next(); st.dirty = true; },
+      get busy() { return st.talking || st.queue.length > 0; },
+    };
+    interactive(frame, { name: `${name}: press to hear the next line`, onSelect: () => api.skip(), enabled: () => g.visible && api.busy });
+    draw();
+    return api;
+  }
+
+  function levelFlow({ key, levels, board: b, intro, podPos = new THREE.Vector3(-0.53, 0.98, -0.36), podYaw = 0.9, guide: gd = null, prologue = null, ending = null }) {
     const pod = new THREE.Group();
     pod.position.copy(podPos); pod.rotation.set(0, podYaw, 0, 'YXZ');
     const tilt = new THREE.Group(); tilt.rotation.x = -0.55; pod.add(tilt);
@@ -877,8 +976,9 @@ export function createGame(opts = {}) {
       restart.userData.draw('Restart level', state.index >= 0 ? '#7b8a97' : '#b8c2ca');
     }
     function showIntro() {
-      b.draw({ heading: intro.heading, body: intro.body, items: levels.map((lv, i) => ({ text: `Level ${i + 1}: ${lv.title}`, state: state.done[i] ? 'done' : 'todo' })), footer: intro.footer });
+      b.draw({ heading: intro.heading, body: intro.body, items: levels.map((lv, i) => ({ text: `${lv.story ? 'Chapter' : 'Level'} ${i + 1}: ${lv.title}`, state: state.done[i] ? 'done' : 'todo' })), footer: intro.footer });
       paint();
+      if (gd && prologue) gd.play(prologue, { chapter: 'Prologue' });
     }
     function go(i) {
       if (carry.item) returnHome(carry.item);
@@ -895,6 +995,7 @@ export function createGame(opts = {}) {
       paint();
       sfx.whoosh();
       levels[i].start();
+      if (gd && levels[i].story) gd.play(levels[i].story.intro || [], { chapter: `Chapter ${i + 1} · ${levels[i].story.chapter || levels[i].title}` });
     }
     function complete(extra = []) {
       const i = state.index; if (i < 0) return;
@@ -908,6 +1009,7 @@ export function createGame(opts = {}) {
       if (all && score.points > best.points) { best.points = score.points; saveBest(key, best); }
       paint();
       sfx.fanfare(); pulse(0.8, 160);
+      if (gd && levels[i].story) gd.play([...(levels[i].story.outro || []), ...(all && ending ? ending : [])], all && ending ? { chapter: 'The end' } : {});
       burst(new THREE.Vector3(0, 1.3, -1.0), 60);
       sparkle(new THREE.Vector3(-0.3, 1.35, -1.0), 30); sparkle(new THREE.Vector3(0.3, 1.35, -1.0), 30);
       const nextTxt = i < levels.length - 1 ? `Press **${i + 2}. ${levels[i + 1].short}** on the left to go on.` : 'You have finished every level. Well done!';
@@ -930,7 +1032,7 @@ export function createGame(opts = {}) {
     mat, lam, basic, mesh, tween, wait, colorTo, shuffle, ease, noHit,
     canvasPlane, roundRect, wrapText, label, button,
     buildRoom, table, board, score, say, popText, burst, sparkle, pulse, contactShadow, glowTexture,
-    interactive, uninteractive, carryable, slot, draggable, get dragging() { return dragState.obj; }, pick, returnHome, settle, carry, slots, storeHome, activate, hitTest,
+    guide, interactive, uninteractive, carryable, slot, draggable, get dragging() { return dragState.obj; }, pick, returnHome, settle, carry, slots, storeHome, activate, hitTest,
     tick: (f) => tickers.push(f), start, placeLearner, onKind: (f) => kindListeners.push(f),
     words: () => inputWords(input.kind), get kind() { return input.kind; },
     setToastAnchor: (v, vr = null) => { toastAnchor.copy(v); toastAnchorVR = vr ? vr.clone() : null; }, get lastSaid() { return lastSaid; },

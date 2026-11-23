@@ -500,14 +500,14 @@ async function taskDone(t) {
 }
 function nextTask() {
   task.i++;
-  if (task.i >= task.list.length) { mode.kind = 'done'; setRow([]); graphG.visible = false; fuseSet.visible = false; flow.complete(task.endNotes || []); return; }
+  if (task.i >= task.list.length) { mode.kind = 'done'; setRow([]); graphG.visible = false; fuseSet.visible = false; clinicG.visible = false; flow.complete(task.endNotes || []); return; }
   loadTask();
 }
 function loadTask() {
   const t = task.list[task.i];
   task.done = false; task.state = {}; task.tries = 0;
   mode.kind = t.kind || 'circuit';
-  graphG.visible = false; showAppliance(null); fuseSet.visible = false; task.fuse = null;
+  graphG.visible = false; showAppliance(null); fuseSet.visible = false; task.fuse = null; clinicG.visible = false;
   if (t.circuit) { buildCircuit(t.circuit()); cb.visible = true; } else cb.visible = false;
   setTray(t.parts || []);
   tray.visible = !!(t.parts && t.parts.length);
@@ -931,7 +931,146 @@ function answerKwh(o) {
   else { task.tries++; score.streak = 0; say(o === '6000 kWh' ? 'Keep power in kilowatts, not watts: 2 kW × 3 h.' : 'Multiply, do not divide: energy = power × time.', 'bad'); }
 }
 
-// ---------------------------------------------------------------- the three levels
+// ---------------------------------------------------------------- level 4: the clinic job
+// A rural clinic: wire two rooms in parallel with their own switches, share a 10 A supply, then cost the fridge.
+const CLINIC = () => ({
+  nodes: [[-0.32, -0.17], [-0.32, 0.13], [-0.2, 0.13], [-0.02, 0.13], [0.18, 0.13], [0.3, 0.13], [-0.2, -0.02], [-0.02, -0.02], [0.18, -0.02], [0.3, -0.02], [0.3, -0.17]],
+  edges: [
+    { a: 0, b: 1, fixed: { type: 'cell', value: 6 }, id: 'cell' },
+    { a: 1, b: 2, kind: 'wire' },
+    { a: 2, b: 3, slot: true, id: 'a1', slotName: 'Ward light: first gap' },
+    { a: 3, b: 4, slot: true, id: 'a2', slotName: 'Ward light: second gap' },
+    { a: 4, b: 5, kind: 'wire' },
+    { a: 2, b: 6, kind: 'wire' },
+    { a: 6, b: 7, slot: true, id: 'b1', slotName: 'Office light: first gap' },
+    { a: 7, b: 8, slot: true, id: 'b2', slotName: 'Office light: second gap' },
+    { a: 8, b: 9, kind: 'wire' },
+    { a: 5, b: 9, kind: 'wire' },
+    { a: 9, b: 10, kind: 'wire' },
+    { a: 10, b: 0, kind: 'wire' },
+  ],
+});
+const ROOMS = [['a1', 'a2', 'ward'], ['b1', 'b2', 'office']];
+const CLINIC_WIRING = {
+  title: 'Light the ward and the office', circuit: CLINIC,
+  parts: [['bulb'], ['switch'], ['bulb'], ['wire'], ['switch']],
+  setup: () => {
+    for (const [txt, y] of [['WARD', 0.17], ['OFFICE', 0.02]]) {
+      const l = label(txt, { w: 0.095, h: 0.028, bg: '#14402a', fg: '#f3f2ee', font: 'bold 40px system-ui, sans-serif', res: 1600 });
+      l.position.set(0.245, y, 0.003); noHit(l); circuitG.add(l);
+    }
+  },
+  body: ['This board is a model of the clinic wiring; the 6 V cell stands in for the solar battery.', 'Each room needs a **bulb** and **its own switch**, so the nurse can turn one light off without the other. Fill the gaps, then light both rooms.'],
+  check: (s) => {
+    for (const [g1, g2, room] of ROOMS) {
+      const a = inEdge(g1), b = inEdge(g2);
+      if (!a || !b) continue;
+      if (a !== 'switch' && b !== 'switch') return `The ${room} light has no switch, so it could never be turned off. Each room needs a bulb and its own switch.`;
+      if (a !== 'bulb' && b !== 'bulb') return `The ${room} row has no bulb in it. Each room needs a bulb and its own switch.`;
+    }
+    if (ROOMS.some(([g1, g2]) => !inEdge(g1) || !inEdge(g2))) return null;
+    const lit = bulbsLit();
+    if (lit[0] && lit[1]) { s.both = true; return 'Both rooms are lit. The office is empty now: switch the **office** light off, but keep the ward light on.'; }
+    if (s.both && lit[0] && !lit[1]) return true;
+    if (s.both && !lit[0] && lit[1]) return 'Oops, that is the ward light, and the nurse is still with a patient! Turn the ward light back on and the office light off.';
+    return null;
+  },
+  points: 20,
+  success: 'Each room is its own parallel branch with its own switch, so one light can go off while the other stays on. That is how every building is wired.',
+};
+const LOADS = [
+  { k: 'fridge', name: 'Vaccine fridge', short: 'Fridge', P: 150 },
+  { k: 'lights', name: 'Lights (4 × 60 W)', short: 'Lights', P: 240 },
+  { k: 'steril', name: 'Steriliser', short: 'Steriliser', P: 1500 },
+  { k: 'kettle', name: 'Kettle', short: 'Kettle', P: 2000 },
+  { k: 'pc', name: 'Computer', short: 'Computer', P: 100 },
+];
+const BREAKER = 10;
+const clinic = { on: {}, tripped: 0 };
+const clinicP = kit.canvasPlane(0.66, 0.42, 1300);
+const clinicG = new THREE.Group();
+clinicG.position.set(0.04, TABLE_Y + 0.3, -0.68); clinicG.rotation.x = -0.22;
+clinicG.add(mesh(new THREE.BoxGeometry(0.68, 0.44, 0.015), mat(0x3a4550, { metalness: 0.3, roughness: 0.4 }), 0, 0, -0.01), clinicP.mesh);
+clinicG.add(mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.12, 10), mat(0x8d969e, { metalness: 0.7, roughness: 0.35 }), 0, -0.27, -0.02));
+noHit(clinicG); clinicG.visible = false; scene.add(clinicG);
+const clinicAmps = () => LOADS.reduce((t, l) => t + (clinic.on[l.k] ? l.P / 230 : 0), 0);
+function drawClinic() {
+  const { ctx, c } = clinicP; const W = c.width, H = c.height;
+  ctx.fillStyle = '#1f2b35'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#7d6608'; ctx.fillRect(0, 0, W, 64);
+  ctx.fillStyle = '#f3f2ee'; ctx.font = 'bold 36px system-ui'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('Clinic supply: 230 V, 10 A breaker', 22, 33);
+  let y = 100;
+  ctx.font = '30px system-ui'; ctx.fillStyle = '#b4c1ca';
+  ctx.fillText('Appliance', 60, y); ctx.textAlign = 'right'; ctx.fillText('Power', W * 0.62, y); ctx.fillText('Current', W - 30, y); ctx.textAlign = 'left';
+  y += 50;
+  for (const l of LOADS) {
+    const on = !!clinic.on[l.k];
+    ctx.fillStyle = on ? '#58d68d' : '#4a5864'; ctx.beginPath(); ctx.arc(34, y, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = on ? '#f3f2ee' : '#8796a3'; ctx.font = `${on ? 'bold ' : ''}36px system-ui`;
+    ctx.fillText(l.name, 60, y);
+    ctx.textAlign = 'right'; ctx.fillText(`${l.P} W`, W * 0.62, y);
+    ctx.fillText(on ? `${(l.P / 230).toFixed(2)} A` : 'off', W - 30, y); ctx.textAlign = 'left';
+    y += 54;
+  }
+  // total current against the breaker limit
+  const I = clinicAmps(), x0 = 30, bw = W - 60, by = H - 62;
+  ctx.fillStyle = '#2b3a46'; kit.roundRect(ctx, x0, by, bw, 40, 10); ctx.fill();
+  const frac = Math.min(1, I / 20);
+  ctx.fillStyle = clinic.tripped > 0 ? '#e74c3c' : I > BREAKER * 0.85 ? '#e0a83a' : '#58d68d';
+  if (frac > 0) { kit.roundRect(ctx, x0, by, Math.max(20, bw * frac), 40, 10); ctx.fill(); }
+  const lx = x0 + bw * (BREAKER / 20);
+  ctx.fillStyle = '#f3f2ee'; ctx.fillRect(lx - 2, by - 12, 4, 64);
+  ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center'; ctx.fillText('10 A', lx, by - 26);
+  ctx.textAlign = 'left'; ctx.font = 'bold 32px system-ui';
+  ctx.fillText(clinic.tripped > 0 ? 'BREAKER TRIPPED: everything is off' : `Total current: ${I.toFixed(2)} A`, x0, by - 26);
+  clinicP.update();
+}
+kit.tick((dt) => { if (clinic.tripped > 0) { clinic.tripped -= dt; if (clinic.tripped <= 0) drawClinic(); } });
+function clinicRow() {
+  return LOADS.map((l) => ({ key: l.k, text: `${l.short} ${clinic.on[l.k] ? 'ON' : 'off'}`, color: clinic.on[l.k] ? '#1e8449' : '#5d6d7e', name: `Switch the ${l.name.toLowerCase()} ${clinic.on[l.k] ? 'off' : 'on'}`, act: () => toggleLoad(l.k) }));
+}
+function toggleLoad(k) {
+  if (task.done || mode.kind !== 'answer' || !clinicG.visible) return;
+  clinic.on[k] = !clinic.on[k];
+  sfx.click();
+  const I = clinicAmps();
+  if (I > BREAKER) {
+    const names = LOADS.filter((l) => clinic.on[l.k]).map((l) => l.short.toLowerCase());
+    clinic.on = {}; clinic.tripped = 2.5; task.tries++; score.streak = 0;
+    sfx.tone(110, 0.4, 'square', 0.08);
+    say(`Breaker tripped! The ${names.join(', ')} together need ${I.toFixed(1)} A, more than 10 A. Everything went off, even the vaccine fridge!`, 'bad', 7);
+    drawTask(`**Tripped at ${I.toFixed(1)} A.** Currents in parallel add up: I = P ÷ V for each appliance.`, 'bad');
+  }
+  setRow(clinicRow()); drawClinic();
+  if (clinic.on.fridge && clinic.on.lights && clinic.on.steril && I <= BREAKER) {
+    taskDone({ points: task.tries ? 10 : 20, success: `Fridge, lights and steriliser together take ${I.toFixed(2)} A, under the 10 A limit. The kettle (${(2000 / 230).toFixed(1)} A on its own) has to wait.` });
+  }
+}
+const CLINIC_POWER = {
+  title: 'Share the power', kind: 'answer',
+  body: ['The clinic’s solar system gives **230 V** through a **10 A** breaker. Someone has left the **kettle** on.',
+    'The nurse needs the **vaccine fridge**, the **lights** and the **steriliser** on together. Switch appliances on and off with the buttons, without tripping the breaker.',
+    'Each appliance takes **I = P ÷ V**, and in parallel the currents **add up**.'],
+  setup: () => { clinic.on = { fridge: true, kettle: true }; clinic.tripped = 0; clinicG.visible = true; drawClinic(); },
+  row: clinicRow,
+  footer: 'Plan it first: 2000 W ÷ 230 V is almost 9 A for the kettle alone.',
+};
+const CLINIC_BILL = {
+  title: 'The fridge’s monthly bill', kind: 'answer',
+  body: ['The **150 W** vaccine fridge runs **24 hours a day** for a **30-day** month. Electricity costs **$0.10 per kWh** (an example price).', 'What does the fridge cost to run for the month?', 'Energy (kWh) = power (kW) × time (h). Cost = kWh × price.'],
+  setup: () => { clinicG.visible = false; },
+  row: () => kit.shuffle(['$10.80', '$10 800', '$0.36']).map((o) => ({ text: o, act: () => answerBill(o) })),
+  footer: 'Change watts to kilowatts first: 150 W = 0.15 kW.',
+};
+function answerBill(o) {
+  if (task.done) return;
+  if (o === '$10.80') taskDone({ points: task.tries ? 8 : 20, success: '0.15 kW × 24 h × 30 days = 108 kWh, and 108 × $0.10 = $10.80 a month to keep the vaccines cold.' });
+  else { task.tries++; score.streak = 0; say(o === '$10 800' ? 'Change watts to kilowatts first: 150 W = 0.15 kW.' : 'That is the cost for one day (3.6 kWh). Multiply by 30 days.', 'bad', 5); }
+}
+const L4_TASKS = [CLINIC_WIRING, CLINIC_POWER, CLINIC_BILL];
+
+// ---------------------------------------------------------------- the levels
 function startLevel(title, list, notes) {
   task.title = title; task.list = list; task.i = 0; task.endNotes = notes;
   plug.visible = false; cb.visible = true;
@@ -943,6 +1082,7 @@ function l2Start() {
   task.gR = [4, 5, 8][Math.floor(Math.random() * 3)];
   startLevel('Level 2', L2_TASKS, ['Ohm’s law: V = I × R. In series resistances add; in parallel the branch currents add.']);
 }
+function l4Start() { clinic.on = {}; startLevel('Level 4', L4_TASKS, ['Rooms are wired in parallel so each has its own switch. Currents in parallel add up, so a breaker limits how much can run at once.']); }
 function l3Start() {
   resetPlug(); task.fuse = null;
   const plugTask = {
@@ -963,15 +1103,23 @@ const flow = kit.levelFlow({
   intro: {
     heading: 'Circuit Workshop: electricity',
     body: ['Build real circuits on the board. Every current and voltage is worked out as you go.',
-      'Light bulbs in series and parallel, use meters, apply **Ohm’s law**, then wire a plug and choose the right fuse.',
+      'Light bulbs in series and parallel, use meters, apply **Ohm’s law**, wire a plug and choose fuses, then power a rural clinic.',
       'Choose a level on the panel to your left to begin.'],
     footer: 'Form 4 Integrated Science: electricity and its safe use at home.',
   },
   levels: [
-    { title: 'Make it work', short: 'Circuits', max: 80, start: l1Start },
-    { title: 'Ohm’s law challenges', short: 'Ohm’s law', max: 80, start: l2Start },
-    { title: 'Safe at home', short: 'Safety', max: 70, start: l3Start },
+    { title: 'Make it work', short: 'Circuits', max: 80, start: l1Start,
+      story: { chapter: 'The apprentice', intro: ['Before you touch real wiring, you must master the circuit board.', 'Light the bulbs, and learn the difference between series and parallel.'], outro: ['Good. You understand how current needs a complete path. Now for some numbers.'] } },
+    { title: 'Ohm’s law challenges', short: 'Ohm’s law', max: 80, start: l2Start,
+      story: { chapter: 'The numbers game', intro: ['An electrician who cannot calculate is a dangerous electrician.', 'Use Ohm’s law, V = I × R, to hit every target.'], outro: ['Spot on. Ohm’s law will never let you down.'] } },
+    { title: 'Safe at home', short: 'Safety', max: 70, start: l3Start,
+      story: { chapter: 'House calls', intro: ['Gogo Moyo’s plug sparks and her kettle keeps blowing fuses. Let us make her home safe.', 'Wire her plug correctly, then choose the right fuse for each appliance.'], outro: ['Gogo Moyo is safe again, and now she knows what her electricity costs.'] } },
+    { title: 'The clinic job', short: 'Clinic', max: 60, start: l4Start, stop: () => { clinicG.visible = false; },
+      story: { chapter: 'The clinic job', intro: ['Our biggest job yet: the new rural clinic in Gutu. It runs on solar power with a 10 A limit.', 'Wire the rooms, share the power wisely, and keep the vaccine fridge running.'], outro: ['The clinic is open and the vaccines are safe. Brilliant work!'] } },
   ],
+  guide: kit.guide({ name: 'Nyasha Dube', role: 'Electrician', look: { skin: '#5a3a22', hair: 'bun', hairCol: '#1d1a18', coat: '#2f5f8f', shirt: '#e0a83a', accent: '#7d6608' } }),
+  prologue: ['Mhoro! I am Nyasha Dube, electrician. I have more jobs than hands, so I need an apprentice.', 'Every job here is a real circuit: the currents and voltages are worked out as you build.', 'Choose Chapter 1 on the panel to your left, and let us get to work.'],
+  ending: ['You are a fully qualified electrician now. I would trust you with any job.', 'Come back any time and try to beat your best score.'],
 });
 plug.visible = false; tray.visible = false; row.visible = false;
 buildCircuit(LOOP({ fixed: { type: 'bulb' } }, { fixed: { type: 'switch' } }));
@@ -979,4 +1127,4 @@ flow.showIntro();
 kit.onKind(() => { if (task.list.length && mode.kind !== 'done' && mode.kind !== 'idle') drawTask(); });
 kit.start();
 
-window.game = { kit, flow, mode, task, pieces, rowBtns, rowBtn, get circ() { return circ; }, get result() { return result; }, solve, termObjs, wireEnds, plug, cb, setSwitch, cartridges, graphG, dots, meters, loadTask, speed: 1 };
+window.game = { kit, flow, mode, task, pieces, rowBtns, rowBtn, get circ() { return circ; }, get result() { return result; }, solve, termObjs, wireEnds, plug, cb, setSwitch, cartridges, graphG, dots, meters, loadTask, clinic, clinicG, LOADS, bulbsLit, speed: 1 };

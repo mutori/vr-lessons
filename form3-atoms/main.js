@@ -22,6 +22,8 @@ const ELEMENTS = [
 const el = (z) => ({ sym: ELEMENTS[z - 1][0], name: ELEMENTS[z - 1][1], A: ELEMENTS[z - 1][2], Z: z });
 const CAP = [2, 8, 8];
 function arrangement(n) { const out = []; let left = n; for (const c of CAP) { if (left <= 0) break; out.push(Math.min(c, left)); left -= c; } return out; }
+const SUP = { 1: '', 2: '²', 3: '³' };
+const chargeStr = (q) => (q > 0 ? `${SUP[q]}⁺` : q < 0 ? `${SUP[-q]}⁻` : '');
 
 // periodic table panel on an easel to the right
 {
@@ -193,7 +195,7 @@ function drawInfo({ target = null, title = 'Your atom', showCounts = true } = {}
   if (target) {
     ctx.fillStyle = '#2b5d80'; ctx.fillRect(0, 0, W, 210);
     ctx.fillStyle = '#f3f2ee'; ctx.font = 'bold 30px system-ui'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-    ctx.fillText(`BUILD: ${target.name.toUpperCase()}`, 18, 14);
+    ctx.fillText(`BUILD: ${(target.ion || target.name).toUpperCase()}`, 18, 14);
     // nuclide notation: mass number top-left, atomic number bottom-left
     const cx = W / 2 + 20;
     ctx.font = 'bold 120px system-ui'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
@@ -202,6 +204,7 @@ function drawInfo({ target = null, title = 'Your atom', showCounts = true } = {}
     ctx.font = 'bold 46px system-ui'; ctx.textAlign = 'right';
     ctx.fillText(String(target.A), cx - sw / 2 - 8, 110);
     ctx.fillText(String(target.Z), cx - sw / 2 - 8, 182);
+    if (target.q) { ctx.textAlign = 'left'; ctx.font = 'bold 54px system-ui'; ctx.fillStyle = target.q > 0 ? '#ffb4a8' : '#a8ccff'; ctx.fillText(chargeStr(target.q), cx + sw / 2 + 6, 104); ctx.fillStyle = '#f3f2ee'; }
     y = 240;
   }
   ctx.fillStyle = '#e4e8ea'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
@@ -216,6 +219,11 @@ function drawInfo({ target = null, title = 'Your atom', showCounts = true } = {}
     ctx.font = '30px system-ui'; ctx.fillStyle = '#b4c1ca';
     const cfg = main.config().filter((x, i) => x || main.config().slice(i + 1).some(Boolean));
     ctx.fillText(`Arrangement: ${cfg.length ? cfg.join(', ') : '—'}`, 18, y + 4);
+    if (target && target.q) {
+      const q = main.p - main.eCount();
+      ctx.fillStyle = q > 0 ? '#ffb4a8' : q < 0 ? '#a8ccff' : '#b4c1ca'; ctx.font = 'bold 30px system-ui';
+      ctx.fillText(`Charge: ${q > 0 ? '+' : q < 0 ? '−' : ''}${Math.abs(q)}`, 18, y + 44);
+    }
   }
   info.update();
 }
@@ -312,8 +320,20 @@ function setRow(defs) {
 const rowBtn = (key) => rowBtns.find((b) => b.visible && b.userData.key === key);
 
 // ================================================================= level 1: build the atom
-const mode = { kind: 'idle' };
+const mode = { kind: 'idle', ion: false };
 const L1 = { targets: [6, 8, 11, 12, 17], i: 0, checks: 0, history: [] };
+// level 4: ion orders (each order is an ion: same nucleus as the atom, but electrons = protons − charge)
+const ION_ORDERS = [
+  { z: 11, q: 1, ion: 'Sodium ion', who: 'A food factory in Chitungwiza', use: 'sodium ions for table salt (sodium chloride)' },
+  { z: 8, q: -2, ion: 'Oxide ion', who: 'A cement factory in Bulawayo', use: 'oxide ions for lime (calcium oxide)' },
+  { z: 12, q: 2, ion: 'Magnesium ion', who: 'A fertiliser company in Harare', use: 'magnesium ions for crops' },
+  { z: 17, q: -1, ion: 'Chloride ion', who: 'A battery maker in Gweru', use: 'chloride ions for zinc chloride batteries' },
+];
+const L4 = { i: 0 };
+function curT() {
+  if (mode.ion) { const o = ION_ORDERS[L4.i]; return { ...el(o.z), q: o.q, who: o.who, use: o.use, ion: o.ion }; }
+  return { ...el(L1.targets[L1.i]), q: 0 };
+}
 // shells: tap (pinch / click) a shell to add an electron there
 main.shells.forEach((ring, si) => {
   const r = SHELL_R[si];
@@ -335,24 +355,39 @@ function addShellElectron(si) {
   if (main.electrons[si].length >= CAP[si]) { say(`Shell ${si + 1} is full: it holds at most ${CAP[si]} electrons.`, 'bad'); return; }
   main.addElectron(si); L1.history.push(si);
   sfx.tone(900 + si * 200, 0.08, 'sine', 0.08);
-  drawInfo({ target: el(L1.targets[L1.i]) });
+  drawInfo({ target: curT() });
 }
 function undoElectron() {
   const si = L1.history.pop(); if (si == null) return;
   const e = main.electrons[si][main.electrons[si].length - 1];
   if (e) { main.group.remove(e); main.electrons[si].pop(); main.layout(si); }
-  drawInfo({ target: el(L1.targets[L1.i]) });
+  drawInfo({ target: curT() });
 }
 function changeNucleus(dp, dn) {
   const p = THREE.MathUtils.clamp(main.p + dp, 0, 20), n = THREE.MathUtils.clamp(main.n + dn, 0, 24);
   if (p === main.p && n === main.n) return;
   main.setNucleus(p, n);
   sfx.tone(dp ? 520 : 380, 0.06, 'triangle', 0.08);
-  drawInfo({ target: el(L1.targets[L1.i]) });
+  drawInfo({ target: curT() });
 }
 function l1Draw(extra = '') {
-  const t = el(L1.targets[L1.i]);
+  const t = curT();
   const w = howTo(kit.kind);
+  if (mode.ion) {
+    const ne = t.Z - t.q;
+    board.draw({
+      heading: 'Level 4: Ion orders', level: `Order ${L4.i + 1} of ${ION_ORDERS.length}`,
+      body: [`**Order from ${t.who[0].toLowerCase() + t.who.slice(1)}:** ${t.use}. Build one **${t.ion.toLowerCase()}, ${t.sym}${chargeStr(t.q)}**, from ${t.name.toLowerCase()}-${t.A}.`,
+        `An ion has the same nucleus as its atom. Only the **electrons** change: a **positive** ion has **lost** electrons, a **negative** ion has **gained** them. Build it from the bins, then press **Check**.`, extra],
+      items: [
+        { text: `Protons = atomic number`, state: 'todo' },
+        { text: `Neutrons = mass number − atomic number`, state: 'todo' },
+        { text: `Electrons = protons − charge; the charge on the card is ${t.q > 0 ? '+' : '−'}${Math.abs(t.q)}`, state: 'todo' },
+      ],
+      footer: '15 points for an ion right first time, 8 on the second check, 4 after that.',
+    });
+    return;
+  }
   board.draw({
     heading: 'Level 1: Build the atom', level: `Atom ${L1.i + 1} of ${L1.targets.length}`,
     body: [`Build an atom of **${t.name.toLowerCase()}-${t.A}**. The card on your left shows its symbol with the **mass number** on top and the **atomic number** below.`,
@@ -366,17 +401,14 @@ function l1Draw(extra = '') {
   });
 }
 function l1Load() {
-  const t = el(L1.targets[L1.i]);
+  const t = curT();
   main.build({ p: 0, n: 0, e: [], sym: '' });
   main.showShells(3);
   L1.checks = 0; L1.history = [];
   drawInfo({ target: t });
   l1Draw();
 }
-function l1Start() {
-  mode.kind = 'build'; binsShow(true);
-  showMain(true); showPair(false);
-  L1.i = 0;
+function buildRow() {
   setRow([
     { text: 'P −1', act: () => changeNucleus(-1, 0), color: '#a93226', name: 'Remove a proton' },
     { text: 'P +1', act: () => changeNucleus(1, 0), color: '#c0392b', name: 'Add a proton' },
@@ -387,32 +419,60 @@ function l1Start() {
     { text: 'Undo e⁻', act: undoElectron, color: '#2471a3', name: 'Remove the last electron' },
     { text: 'Check', act: l1Check, color: '#1e8449', name: 'Check my atom' },
   ]);
+}
+function l1Start() {
+  mode.kind = 'build'; mode.ion = false; binsShow(true);
+  showMain(true); showPair(false);
+  L1.i = 0;
+  buildRow();
+  l1Load();
+}
+function l4Start() {
+  mode.kind = 'build'; mode.ion = true; binsShow(true);
+  showMain(true); showPair(false);
+  L4.i = 0;
+  buildRow();
   l1Load();
 }
 async function l1Check() {
   if (mode.kind !== 'build') return;
-  const t = el(L1.targets[L1.i]);
-  const cfg = main.config(); const want = arrangement(t.Z);
+  const t = curT();
+  const ne = t.Z - t.q;
+  const cfg = main.config(); const want = arrangement(ne);
   const N = t.A - t.Z;
   let msg = null;
   if (main.p !== t.Z) msg = `Protons: the atomic number (the bottom number) is ${t.Z}, so ${t.name.toLowerCase()} has ${t.Z} protons. You have ${main.p}.`;
   else if (main.n !== N) msg = `Neutrons = mass number − atomic number = ${t.A} − ${t.Z} = ${N}. You have ${main.n}.`;
-  else if (main.eCount() !== t.Z) msg = `A neutral atom has as many electrons as protons: ${t.Z}. You have ${main.eCount()}.`;
+  else if (!t.q && main.eCount() !== t.Z) msg = `A neutral atom has as many electrons as protons: ${t.Z}. You have ${main.eCount()}.`;
+  else if (t.q && main.eCount() !== ne) msg = t.q > 0
+    ? `${t.sym}${chargeStr(t.q)} has a charge of +${t.q}: the atom has LOST ${t.q} electron${t.q > 1 ? 's' : ''}. Electrons = ${t.Z} − ${t.q} = ${ne}. You have ${main.eCount()}.`
+    : `${t.sym}${chargeStr(t.q)} has a charge of −${-t.q}: the atom has GAINED ${-t.q} electron${t.q < -1 ? 's' : ''}. Electrons = ${t.Z} + ${-t.q} = ${ne}. You have ${main.eCount()}.`;
   else if (cfg.some((c, i) => c !== (want[i] || 0))) msg = `Right number of electrons, wrong shells. Fill from the inside: ${want.join(', ')}.`;
   L1.checks++;
   if (msg) { score.streak = 0; say(msg, 'bad', 6); l1Draw(`**Not yet.** ${msg}`); return; }
   const run = kit.newRun();
   mode.kind = 'build-wait';
-  const pts = L1.checks === 1 ? 20 : L1.checks === 2 ? 10 : 5;
+  const pts = mode.ion ? (L1.checks === 1 ? 15 : L1.checks === 2 ? 8 : 4) : (L1.checks === 1 ? 20 : L1.checks === 2 ? 10 : 5);
   score.add(pts, main.group.position.clone().add(new THREE.Vector3(0, 0.2, 0)));
-  main.sym.userData.draw(`${t.sym}`, null);
+  main.sym.userData.draw(`${t.sym}${chargeStr(t.q)}`, null, t.q > 0 ? '#b03a2e' : t.q < 0 ? '#1f4466' : undefined);
   kit.burst(main.group.position.clone().add(new THREE.Vector3(0, 0.1, 0.05)), 40);
-  say(`Perfect ${t.name.toLowerCase()} atom: ${t.Z} protons, ${N} neutrons, electrons ${want.join(', ')}.`, 'good', 5);
+  let halo = null;
+  if (t.q) {
+    halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.q > 0 ? ionTex.pos : ionTex.neg, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.scale.setScalar(SHELL_R[2] * 3.2); halo.position.z = -0.02; noHit(halo); main.group.add(halo);
+    say(`Order filled: ${t.sym}${chargeStr(t.q)} with ${t.Z} protons and ${ne} electrons (${want.join(', ')}), a full outer shell. Charge = ${t.Z} − ${ne} = ${t.q > 0 ? '+' : '−'}${Math.abs(t.q)}.`, 'good', 6);
+  } else say(`Perfect ${t.name.toLowerCase()} atom: ${t.Z} protons, ${N} neutrons, electrons ${want.join(', ')}.`, 'good', 5);
   // spin the electrons for a moment
   await tween(1.6, (k) => { main.group.rotation.z = k * Math.PI * 2; });
   main.group.rotation.z = 0;
+  if (halo) main.group.remove(halo);
   if (!kit.isRun(run)) return;
   mode.kind = 'build';
+  if (mode.ion) {
+    L4.i++;
+    if (L4.i >= ION_ORDERS.length) { mode.kind = 'done'; mode.ion = false; setRow([]); flow.complete(['A positive ion has fewer electrons than protons; a negative ion has more. Ions of Groups 1, 2, 6 and 7 have full outer shells.']); return; }
+    l1Load(); return;
+  }
   L1.i++;
   if (L1.i >= L1.targets.length) { mode.kind = 'done'; setRow([]); flow.complete(['Atomic number = protons. Mass number = protons + neutrons. Electrons fill shells 2, 8, 8.']); return; }
   l1Load();
@@ -665,15 +725,23 @@ const flow = kit.levelFlow({
   intro: {
     heading: 'Atom Forge: atoms, ions and bonds',
     body: ['Atoms are built from **protons** and **neutrons** in the nucleus, with **electrons** in shells around it.',
-      'Build atoms from their symbols, move electrons to make ions and ionic bonds, then identify mystery particles.',
+      'Build atoms from their symbols, move electrons to make ions and ionic bonds, identify mystery particles, then fill ion orders for factories.',
       'Choose a level on the panel to your left to begin.'],
     footer: 'Form 3 Integrated Science: atomic structure, electron arrangement and ionic bonding.',
   },
   levels: [
-    { title: 'Build the atom', short: 'Build it', max: 100, start: l1Start, stop: () => { if (heldToken()) kit.returnHome(kit.carry.item); } },
-    { title: 'Make ions, make a bond', short: 'Bond it', max: 80, start: l2Start, stop: () => { if (kit.carry.item) kit.returnHome(kit.carry.item); } },
-    { title: 'What particle is this?', short: 'Name it', max: 60, start: l3Start },
+    { title: 'Build the atom', short: 'Build it', max: 100, start: l1Start, stop: () => { if (heldToken()) kit.returnHome(kit.carry.item); },
+      story: { chapter: 'The apprentice', intro: ['Every element in the universe is built from just three particles. Your first job: build five atoms exactly to order.', 'Read the card. The bottom number gives the protons; the top number minus the bottom gives the neutrons.'], outro: ['Five perfect atoms. You have earned your forge apron!'] } },
+    { title: 'Make ions, make a bond', short: 'Bond it', max: 80, start: l2Start, stop: () => { if (kit.carry.item) kit.returnHome(kit.carry.item); },
+      story: { chapter: 'Making salt', intro: ['A metal atom and a non-metal atom are sitting side by side. Neither is stable yet.', 'Move the metal\'s outer electrons across until both have full outer shells. That is how salt is made.'], outro: ['The ions snapped together. That pull between opposite charges is an ionic bond.'] } },
+    { title: 'What particle is this?', short: 'Name it', max: 60, start: l3Start,
+      story: { chapter: 'The detective', intro: ['Someone has mixed up the labels on our particles. Is each one an atom, an ion or an isotope?', 'Count the protons to name the element, then compare the electrons and the neutrons.'], outro: ['Every label is back where it belongs. Sharp work, detective.'] } },
+    { title: 'Ion orders', short: 'Ion orders', max: 60, start: l4Start, stop: () => { mode.ion = false; if (heldToken()) kit.returnHome(kit.carry.item); },
+      story: { chapter: 'Ion orders', intro: ['Big news: factories across Zimbabwe are sending orders to the forge. They need ions, not atoms.', 'Build each ion exactly. Same nucleus as the atom, but count the electrons carefully: lose them for a positive ion, gain them for a negative one.'], outro: ['Every order delivered on time. The factories are very happy.'] } },
   ],
+  guide: kit.guide({ name: 'Farai Ncube', role: 'Forge master', look: { skin: '#6b4026', hair: 'short', hairCol: '#1d1a18', glasses: true, shirt: '#2e5e8c', coat: '#e9ecef', accent: '#2e5e8c' } }),
+  prologue: ['Welcome to the Atom Forge! I am Farai Ncube, the forge master.', 'Here we build atoms and ions one particle at a time, and they are used in factories all over the country.', 'I need a new apprentice. Choose Chapter 1 on the panel to your left to start your training.'],
+  ending: ['You are now a master of the forge. Atoms, ions, bonds: you can build them all.', 'Come back any time and try to beat your best score.'],
 });
 main.build({ p: 11, n: 12, e: [2, 8, 1], sym: 'Na' });
 drawInfo({ title: 'Sodium atom' });
@@ -682,4 +750,4 @@ flow.showIntro();
 kit.onKind(() => { if (mode.kind === 'build') l1Draw(); else if (mode.kind === 'bond') l2Draw(); });
 kit.start();
 
-window.game = { kit, flow, main, mode, L1, L2, L3, PAIRS, QUIZ3, board, rowBtns, rowBtn, el, arrangement, l2Load, tokens, nucHit, latticeG, speed: 1 };
+window.game = { kit, flow, main, mode, L1, L2, L3, L4, ION_ORDERS, curT, PAIRS, QUIZ3, board, rowBtns, rowBtn, el, arrangement, l2Load, tokens, nucHit, latticeG, speed: 1 };
