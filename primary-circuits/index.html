@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Light Up the Village</title>
-<meta name="description" content="A WebXR circuits game for Grades 5 to 7: build a torch, test conductors, fix faults, wire a hut in series and parallel, and run a solar water pump. Works in the Meta Quest Browser and on a computer.">
+<meta name="description" content="A WebXR circuits game for Grades 5 to 7: build a torch, test conductors, fix faults, wire a hut in series and parallel, run a solar water pump, then free-build in the workshop. Works in the Meta Quest Browser and on a computer.">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d8f2; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   canvas { display: block; touch-action: none; }
@@ -18,7 +18,7 @@
   #help button { margin-top: 6px; background: #6b4a2c; color: #fff; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
   #help.min p, #help.min ul { display: none; }
   #help ul { margin: 4px 0; padding-left: 18px; }
-  #results { position: absolute; right: 12px; top: 12px; max-width: 300px; background: rgba(255,255,255,0.92); color: #13293d; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
+  #results { position: absolute; right: 12px; bottom: 12px; max-width: 300px; background: rgba(255,255,255,0.92); color: #13293d; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
   #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #234; font-size: 18px; }
 </style>
 </head>
@@ -26,14 +26,15 @@
 <div id="loading">Loading the village…</div>
 <div id="help">
   <h1>Light Up the Village (Grades 5–7)</h1>
-  <p>Five circuit missions on one workbench. On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
+  <p>Five circuit missions and a free-build workshop, with Tendai as your guide. On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
   <ul>
     <li><b>Pinch</b> a part on the tray to pick it up. Bring it over an empty gap on the board and <b>pinch</b> again to place it. Pinch in the air to put it back.</li>
     <li><b>Touch</b> the red switch lever and the buttons with your fingertip.</li>
     <li>For things out of reach, <b>point</b> and pinch (or pull the trigger).</li>
-    <li>The buttons on the front of the table choose a mission, restart, clear the board and go to the next mission.</li>
+    <li>The buttons on the front of the table choose a mission (6 is the workshop), read the board aloud, restart, clear the board and go to the next mission.</li>
+    <li>In the workshop, a quick pinch on a placed cell turns it round.</li>
   </ul>
-  <p>On a computer: <b>click</b> a part, then <b>click</b> an empty gap. Click a switch lever to flip it. <b>Drag</b> to look around. Keys: <kbd>1</kbd>–<kbd>5</kbd> missions, <kbd>R</kbd> restart, <kbd>C</kbd> clear, <kbd>N</kbd> next.</p>
+  <p>On a computer: <b>click</b> a part, then <b>click</b> an empty gap. Click a switch lever to flip it. In the workshop, right-click a cell to turn it round. <b>Drag</b> to look around. Keys: <kbd>1</kbd>–<kbd>6</kbd> missions, <kbd>R</kbd> restart, <kbd>C</kbd> clear, <kbd>N</kbd> next.</p>
   <button id="helpToggle">Hide help</button>
 </div>
 <div id="results" hidden></div>
