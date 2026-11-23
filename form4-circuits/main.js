@@ -37,20 +37,37 @@ const circuitG = new THREE.Group(); cb.add(circuitG);
 // ---------------------------------------------------------------- symbols drawn on canvases
 function drawSymbol(ctx, W, H, type, text = '') {
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#fdfdf8'; kit.roundRect(ctx, 3, 3, W - 6, H - 6, 16); ctx.fill();
+  ctx.fillStyle = '#ecebe4'; kit.roundRect(ctx, 3, 3, W - 6, H - 6, 16); ctx.fill();
   ctx.strokeStyle = '#13293d'; ctx.fillStyle = '#13293d'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   const cy = H * 0.42, cx = W / 2;
   const lead = (x1, x2) => { ctx.beginPath(); ctx.moveTo(x1, cy); ctx.lineTo(x2, cy); ctx.stroke(); };
   if (type === 'resistor' || type === 'unknown') {
     lead(18, cx - 60); lead(cx + 60, W - 18); ctx.strokeRect(cx - 60, cy - 22, 120, 44);
+  } else if (type === 'rheostat') {
+    lead(18, cx - 60); lead(cx + 60, W - 18); ctx.strokeRect(cx - 60, cy - 22, 120, 44);
+    ctx.beginPath(); ctx.moveTo(cx - 52, cy + 38); ctx.lineTo(cx + 46, cy - 36); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + 52, cy - 42); ctx.lineTo(cx + 30, cy - 38); ctx.lineTo(cx + 44, cy - 22); ctx.closePath(); ctx.fill();
   } else if (type === 'bulb') {
     lead(18, cx - 30); lead(cx + 30, W - 18);
     ctx.beginPath(); ctx.arc(cx, cy, 30, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cx - 21, cy - 21); ctx.lineTo(cx + 21, cy + 21); ctx.moveTo(cx + 21, cy - 21); ctx.lineTo(cx - 21, cy + 21); ctx.stroke();
   } else if (type === 'ammeter' || type === 'voltmeter') {
-    lead(18, cx - 32); lead(cx + 32, W - 18);
-    ctx.beginPath(); ctx.arc(cx, cy, 32, 0, Math.PI * 2); ctx.stroke();
-    ctx.font = 'bold 42px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(type === 'ammeter' ? 'A' : 'V', cx, cy + 2);
+    // an analogue meter: leads, a cream dial window with a scale, and the meter's letter
+    lead(18, 64); lead(W - 64, W - 18);
+    ctx.fillStyle = '#f4efdf'; kit.roundRect(ctx, 64, 8, W - 128, H - 16, 12); ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#13293d'; kit.roundRect(ctx, 64, 8, W - 128, H - 16, 12); ctx.stroke();
+    const max = type === 'ammeter' ? 3 : 6, dx = cx, dy = H - 18, R = (H - 18) * 0.78;
+    ctx.lineWidth = 3;
+    for (let i = 0; i <= max * 2; i++) {
+      const a = Math.PI / 2 + (0.5 - i / (max * 2)) * DIAL_SWEEP;
+      const r0 = i % 2 ? R * 0.88 : R * 0.8;
+      ctx.beginPath(); ctx.moveTo(dx + Math.cos(a) * r0, dy - Math.sin(a) * r0); ctx.lineTo(dx + Math.cos(a) * R, dy - Math.sin(a) * R); ctx.stroke();
+      if (i % 2 === 0) { ctx.font = 'bold 20px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#13293d'; ctx.fillText(String(i / 2), dx + Math.cos(a) * R * 0.63, dy - Math.sin(a) * R * 0.63); }
+    }
+    ctx.beginPath(); ctx.arc(64 + 26, H - 30, 18, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(type === 'ammeter' ? 'A' : 'V', 64 + 26, H - 29);
+    if (text) { ctx.font = 'bold 22px ui-monospace, monospace'; ctx.textAlign = 'right'; ctx.fillStyle = '#1e6b3a'; ctx.fillText(text, W - 72, H - 26); }
+    return;
   } else if (type === 'switch') {
     lead(18, cx - 40); lead(cx + 40, W - 18);
     ctx.beginPath(); ctx.arc(cx - 40, cy, 7, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(cx + 40, cy, 7, 0, Math.PI * 2); ctx.fill();
@@ -65,13 +82,14 @@ function drawSymbol(ctx, W, H, type, text = '') {
   if (text && type !== 'switch') { ctx.font = 'bold 30px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText(text, cx, H - 16); }
 }
 const PIECE_W = 0.13, PIECE_H = 0.058;
+const DIAL_SWEEP = 2.4;   // radians from 0 to full scale
 // a soft round glow for lit bulbs
 const glowTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
   const g = x.createRadialGradient(64, 64, 4, 64, 64, 64); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.3, 'rgba(255,240,180,0.6)'); g.addColorStop(1, 'rgba(255,220,120,0)');
   x.fillStyle = g; x.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 })();
-const COLORS = { resistor: 0xc8a165, unknown: 0x8e7cc3, bulb: 0xe8e0c0, ammeter: 0x5d8aa8, voltmeter: 0xa86b5d, switch: 0x7b8a97, wire: 0xb87333, cell: 0x3d3d3d };
+const COLORS = { rheostat: 0x6f8fa8, resistor: 0xc8a165, unknown: 0x8e7cc3, bulb: 0xe8e0c0, ammeter: 0x5d8aa8, voltmeter: 0xa86b5d, switch: 0x7b8a97, wire: 0xb87333, cell: 0x3d3d3d };
 function pieceMesh(type, value = null) {
   const g = new THREE.Group();
   g.add(mesh(new THREE.BoxGeometry(PIECE_W, PIECE_H, 0.016), lam(COLORS[type]), 0, 0, -0.008));
@@ -79,7 +97,7 @@ function pieceMesh(type, value = null) {
   c.mesh.position.z = 0.0005;
   g.add(c.mesh);
   g.userData.type = type; g.userData.value = value; g.userData.canvas = c;
-  const text = type === 'resistor' ? `${value} Ω` : type === 'unknown' ? 'X' : type === 'cell' ? `${value} V` : type === 'bulb' ? '6 V bulb' : type === 'switch' ? 'open' : '';
+  const text = type === 'resistor' ? `${value} Ω` : type === 'unknown' ? 'X' : type === 'rheostat' ? 'rheostat' : type === 'cell' ? `${value} V` : type === 'bulb' ? '6 V bulb' : type === 'switch' ? 'open' : '';
   g.userData.text = text;
   drawSymbol(c.ctx, c.c.width, c.c.height, type, text); c.update();
   if (type === 'bulb') {
@@ -90,9 +108,35 @@ function pieceMesh(type, value = null) {
     g.add(bulb, halo); g.userData.glass = glass; g.userData.halo = halo;
   }
   if (type === 'switch') g.userData.closed = false;
+  if (type === 'ammeter' || type === 'voltmeter') {
+    const ch = PIECE_H - 0.004;
+    const pivot = new THREE.Group(); pivot.position.set(0, -ch / 2 + ch * (18 / 140), 0.002);
+    const len = ch * 0.75;
+    pivot.add(mesh(new THREE.BoxGeometry(0.0013, len, 0.0008), basic(0xb03a2e), 0, len / 2, 0));
+    pivot.add(mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.002, 12).rotateX(Math.PI / 2), basic(0x13293d)));
+    noHit(pivot); g.add(pivot);
+    g.userData.needle = pivot; g.userData.max = type === 'ammeter' ? 3 : 6; g.userData.val = 0; g.userData.shown = 0; g.userData.vel = 0;
+    pivot.rotation.z = DIAL_SWEEP / 2;
+    meters.add(g);
+  }
   return g;
 }
+// meter needles swing to their readings with a little overshoot, like a real moving-coil meter
+const meters = new Set();
+kit.tick((dt) => {
+  for (const m of meters) {
+    if (!m.parent) { meters.delete(m); continue; }
+    const u = m.userData, target = Math.min(u.val, u.max * 1.05);
+    u.vel += ((target - u.shown) * 90 - u.vel * 11) * dt; u.shown += u.vel * dt;
+    u.needle.rotation.z = (0.5 - THREE.MathUtils.clamp(u.shown / u.max, -0.03, 1.06)) * DIAL_SWEEP;
+  }
+});
 function setReading(p, txt) {
+  if (p.userData.needle) {
+    p.userData.val = txt && txt !== 'ERR' ? parseFloat(txt) : txt === 'ERR' ? p.userData.max * 1.2 : 0;
+    const c = p.userData.canvas; drawSymbol(c.ctx, c.c.width, c.c.height, p.userData.type, txt); c.update();
+    return;
+  }
   const c = p.userData.canvas; const { ctx, c: cv } = c;
   drawSymbol(ctx, cv.width, cv.height, p.userData.type, '');
   if (txt) {
@@ -148,8 +192,9 @@ function buildCircuit(def) {
       if (ed.fixed) {
         const p = pieceMesh(ed.fixed.type, ed.fixed.value);
         p.position.set(mid.x, mid.y, 0.009); p.rotation.z = e.angle + (ed.flip ? Math.PI : 0);
-        circuitG.add(p); e.fixedObj = p;
-        kit.interactive(p, { name: ed.fixed.name || pieceName(ed.fixed.type, ed.fixed.value), near: false, onSelect: () => {} });
+        circuitG.add(p); e.fixedObj = p; p.userData.spec = ed.fixed;
+        if (ed.fixed.type === 'rheostat') makeRheostat(p);
+        else kit.interactive(p, { name: ed.fixed.name || pieceName(ed.fixed.type, ed.fixed.value), near: false, onSelect: () => {} });
       } else {
         // an empty slot: a dashed outline that glows
         const s = new THREE.Group(); s.position.set(mid.x, mid.y, 0.006); s.rotation.z = e.angle;
@@ -170,8 +215,32 @@ function buildCircuit(def) {
   });
   solve();
 }
+// A rheostat is a variable resistor: slide its contact to change the resistance from 1 Ω to 20 Ω.
+const RHEO = { min: 1, max: 20, half: 0.046 };
+function makeRheostat(p) {
+  const track = mesh(new THREE.BoxGeometry(RHEO.half * 2 + 0.012, 0.007, 0.006), mat(0x8d969e, { metalness: 0.7, roughness: 0.3 }), 0, PIECE_H / 2 + 0.006, 0.004);
+  const knob = new THREE.Group();
+  knob.add(mesh(new THREE.BoxGeometry(0.016, 0.02, 0.016), mat(0xe0a83a, { roughness: 0.35 }), 0, 0, 0.01));
+  knob.add(mesh(new THREE.BoxGeometry(0.004, 0.026, 0.004), mat(0x3a4550), 0, -0.012, 0.004));
+  knob.position.set(0, PIECE_H / 2 + 0.006, 0);
+  p.add(track, knob); p.userData.knob = knob;
+  const setX = (x, now = true) => {
+    x = THREE.MathUtils.clamp(x, -RHEO.half, RHEO.half); knob.position.x = x;
+    const R = RHEO.min + (x + RHEO.half) / (RHEO.half * 2) * (RHEO.max - RHEO.min);
+    p.userData.spec.value = Math.round(R * 10) / 10; if (now) solve();
+  };
+  p.userData.setR = (R, now = true) => setX(((R - RHEO.min) / (RHEO.max - RHEO.min)) * RHEO.half * 2 - RHEO.half, now);
+  const _l = new THREE.Vector3(), _n = new THREE.Vector3(), _w = new THREE.Vector3();
+  kit.draggable(knob, {
+    name: 'Rheostat: slide to change the resistance',
+    enabled: () => mode.kind === 'graph' && cb.visible,
+    plane: () => { knob.getWorldPosition(_w); _n.set(0, 0, 1).transformDirection(p.matrixWorld); return new THREE.Plane().setFromNormalAndCoplanarPoint(_n, _w); },
+    onMove: (pt) => { p.worldToLocal(_l.copy(pt)); setX(_l.x); },
+  });
+  p.userData.setR(p.userData.spec.value, false);
+}
 function pieceName(type, value) {
-  return { resistor: `${value} Ω resistor`, unknown: 'Resistor X', bulb: 'Bulb', ammeter: 'Ammeter', voltmeter: 'Voltmeter', switch: 'Switch', wire: 'Connecting wire', cell: `${value} V cell` }[type];
+  return { rheostat: 'Rheostat', resistor: `${value} Ω resistor`, unknown: 'Resistor X', bulb: 'Bulb', ammeter: 'Ammeter', voltmeter: 'Voltmeter', switch: 'Switch', wire: 'Connecting wire', cell: `${value} V cell` }[type];
 }
 async function placePiece(item, e) {
   if (e.piece && e.piece !== item) {
@@ -207,7 +276,7 @@ function conductance(c) {
     case 'wire': case 'ammeter': return 1 / R_WIRE;
     case 'switch': return c.closed ? 1 / R_WIRE : 0;
     case 'voltmeter': return 1 / R_VOLT;
-    case 'resistor': case 'unknown': return 1 / c.value;
+    case 'resistor': case 'unknown': case 'rheostat': return 1 / c.value;
     case 'bulb': return 1 / 6;
     case 'cell': return 1 / R_CELL;
     default: return 0;
@@ -260,6 +329,33 @@ function solve() {
   });
   shortWarn(result.short);
   levelCheck();
+}
+// ---------------------------------------------------------------- moving current
+// Yellow dots stream along the wires (conventional current, + to −). Faster dots = more current.
+const DOT_MAX = 420;
+const dotMat = new THREE.MeshBasicMaterial({ color: 0xffd34d });
+const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0034, 8, 6), dotMat, DOT_MAX);
+dots.count = 0; dots.frustumCulled = false; noHit(dots); cb.add(dots);
+{
+  const m = new THREE.Matrix4(), v = new THREE.Vector3(), SP = 0.03;
+  kit.tick((dt) => {
+    if (!circ || !cb.visible || !result.I.length) { dots.count = 0; return; }
+    let n = 0;
+    circ.edges.forEach((e, i) => {
+      const I = result.I[i] || 0, a = Math.abs(I);
+      if (a < 0.02) return;
+      const speed = Math.min(0.2, 0.012 + 0.07 * Math.sqrt(a)) * (result.short ? 2.5 : 1);
+      e.flow = (e.flow || 0) + dt * speed * Math.sign(I);
+      const len = e.A.distanceTo(e.B), k = Math.floor(len / SP);
+      for (let j = 0; j < k && n < DOT_MAX; j++) {
+        const f = ((((j * SP + e.flow) % len) + len) % len) / len;
+        v.lerpVectors(e.A, e.B, f); v.z = 0.0048;
+        dots.setMatrixAt(n++, m.makeTranslation(v.x, v.y, v.z));
+      }
+    });
+    dots.count = n; dots.instanceMatrix.needsUpdate = true;
+    dotMat.color.set(result.short ? 0xff5a4a : 0xffd34d);
+  });
 }
 let shortShown = false;
 function shortWarn(on) {
@@ -404,13 +500,14 @@ async function taskDone(t) {
 }
 function nextTask() {
   task.i++;
-  if (task.i >= task.list.length) { mode.kind = 'done'; setRow([]); flow.complete(task.endNotes || []); return; }
+  if (task.i >= task.list.length) { mode.kind = 'done'; setRow([]); graphG.visible = false; fuseSet.visible = false; flow.complete(task.endNotes || []); return; }
   loadTask();
 }
 function loadTask() {
   const t = task.list[task.i];
   task.done = false; task.state = {}; task.tries = 0;
   mode.kind = t.kind || 'circuit';
+  graphG.visible = false; showAppliance(null); fuseSet.visible = false; task.fuse = null;
   if (t.circuit) { buildCircuit(t.circuit()); cb.visible = true; } else cb.visible = false;
   setTray(t.parts || []);
   tray.visible = !!(t.parts && t.parts.length);
@@ -521,7 +618,90 @@ const L2_TASKS = [
     },
     success: '6 ÷ 4 = 1.5 A and 6 ÷ 6 = 1 A. In parallel the currents add: 1.5 + 1 = 2.5 A.',
   },
+  {
+    title: 'Plot the V–I graph', kind: 'graph', circuit: () => RHEO_CIRCUIT(),
+    setup: () => { task.pts = []; task.live = null; lastLive = ''; graphG.visible = true; drawGraph(); },
+    body: (w) => ['The **rheostat** is a variable resistor. Slide its orange knob to change the current through resistor **R**.',
+      `Take **4 readings** spread out from low to high: slide the knob (${kit.kind === 'hand' ? 'pinch it and move your hand' : kit.kind === 'controller' ? 'hold the trigger on it and move' : 'drag it with the mouse'}, or use the buttons), then press **Record**.`,
+      'Then use your graph to find R.'],
+    row: () => [{ text: '◀ Less R', act: () => nudge(-3), name: 'Rheostat: less resistance' }, { text: 'More R ▶', act: () => nudge(3), name: 'Rheostat: more resistance' }, { text: 'Record', act: recordReading, color: '#1e8449', name: 'Record this reading on the graph' }],
+    footer: 'In a school practical you plot V against I and the gradient gives the resistance.',
+  },
 ];
+// ---------------------------------------------------------------- the V–I graph (level 2, task 4)
+const RHEO_CIRCUIT = () => ({
+  nodes: [[-0.3, -0.15], [-0.3, 0.15], [-0.1, 0.15], [0.12, 0.15], [0.12, -0.15], [0.3, 0.15], [0.3, -0.15]],
+  edges: [
+    { a: 0, b: 1, fixed: { type: 'cell', value: 6 }, id: 'cell' },
+    { a: 1, b: 2, fixed: { type: 'ammeter' }, id: 'amm' },
+    { a: 2, b: 3, fixed: { type: 'rheostat', value: 12 }, id: 'rheo' },
+    { a: 3, b: 4, fixed: { type: 'unknown', value: task.gR, name: 'Resistor R (unknown)' }, id: 'load' },
+    { a: 4, b: 0, kind: 'wire' }, { a: 3, b: 5, kind: 'wire' },
+    { a: 5, b: 6, fixed: { type: 'voltmeter' }, id: 'vm' }, { a: 6, b: 4, kind: 'wire' },
+  ],
+});
+const graph = kit.canvasPlane(0.44, 0.34, 1300);
+const graphG = new THREE.Group();
+graphG.position.set(0.6, TABLE_Y + 0.32, -0.6); graphG.rotation.set(-0.12, -0.6, 0, 'YXZ');
+graphG.add(mesh(new THREE.BoxGeometry(0.46, 0.36, 0.015), mat(0x3a4550, { metalness: 0.3, roughness: 0.4 }), 0, 0, -0.01), graph.mesh);
+graphG.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.33, 10), mat(0x8d969e, { metalness: 0.7, roughness: 0.35 }), 0, -0.33, -0.02));
+noHit(graphG); graphG.visible = false; scene.add(graphG);
+const GV = 6.5, GI = 1.6;
+function drawGraph() {
+  const { ctx, c } = graph; const W = c.width, H = c.height;
+  ctx.fillStyle = '#1f2b35'; ctx.fillRect(0, 0, W, H);
+  const x0 = 90, y0 = H - 70, gw = W - 130, gh = H - 130;
+  const X = (v) => x0 + (v / GV) * gw, Y = (i) => y0 - (i / GI) * gh;
+  ctx.strokeStyle = 'rgba(180,193,202,0.18)'; ctx.lineWidth = 1;
+  for (let v = 1; v <= 6; v++) { ctx.beginPath(); ctx.moveTo(X(v), y0); ctx.lineTo(X(v), y0 - gh); ctx.stroke(); }
+  for (let i = 0.2; i <= GI + 1e-6; i += 0.2) { ctx.beginPath(); ctx.moveTo(x0, Y(i)); ctx.lineTo(x0 + gw, Y(i)); ctx.stroke(); }
+  ctx.strokeStyle = '#b4c1ca'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x0, y0 - gh); ctx.lineTo(x0, y0); ctx.lineTo(x0 + gw, y0); ctx.stroke();
+  ctx.fillStyle = '#e4e8ea'; ctx.font = '24px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let v = 0; v <= 6; v++) ctx.fillText(String(v), X(v), y0 + 8);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= GI + 1e-6; i += 0.4) ctx.fillText(i.toFixed(1), x0 - 10, Y(i));
+  ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText('Voltage across R (V)', x0 + gw / 2, y0 + 36);
+  ctx.save(); ctx.translate(26, y0 - gh / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('Current (A)', 0, -12); ctx.restore();
+  ctx.textAlign = 'left'; ctx.font = 'bold 30px system-ui'; ctx.fillStyle = '#e4e8ea'; ctx.fillText('Ohm’s law graph', 20, 14);
+  const pts = task.pts || [];
+  // the live reading moves as you slide the rheostat
+  if (task.live) { ctx.strokeStyle = 'rgba(224,168,58,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X(task.live[0]), Y(task.live[1]), 12, 0, Math.PI * 2); ctx.stroke(); }
+  if (pts.length >= 4) {
+    const k = pts.reduce((a, [v, i]) => a + v * i, 0) / pts.reduce((a, [v]) => a + v * v, 0);
+    ctx.strokeStyle = '#5fb8ff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(GV), Y(k * GV)); ctx.stroke();
+  }
+  ctx.fillStyle = '#5df08f';
+  for (const [v, i] of pts) { ctx.beginPath(); ctx.arc(X(v), Y(i), 9, 0, Math.PI * 2); ctx.fill(); }
+  ctx.textAlign = 'right'; ctx.font = '24px system-ui'; ctx.fillStyle = '#b4c1ca'; ctx.fillText(`${pts.length} of 4 readings`, W - 20, 18);
+  graph.update();
+}
+const loadV = () => edgeVolt('load'), loadI = () => edgeCur('amm');
+let lastLive = '';
+kit.tick(() => {
+  if (!graphG.visible || mode.kind !== 'graph') return;
+  const key = loadV().toFixed(2) + loadI().toFixed(3);
+  if (key !== lastLive) { lastLive = key; task.live = [loadV(), loadI()]; drawGraph(); }
+});
+function recordReading() {
+  if (mode.kind !== 'graph' || task.done) return;
+  const v = loadV(), i = loadI();
+  if ((task.pts || []).some(([pv]) => Math.abs(pv - v) < 0.35)) { say('You already have a reading near there. Slide the rheostat to get a different voltage first.', 'bad'); return; }
+  task.pts.push([v, i]); sfx.pick(); kit.sparkle(graphG.localToWorld(new THREE.Vector3(-0.2 + 0.4 * v / GV, -0.13 + 0.26 * i / GI, 0.02)), 8, 0x5df08f);
+  drawGraph(); drawTask(`Reading ${task.pts.length}: **${v.toFixed(2)} V**, **${i.toFixed(2)} A**.`);
+  if (task.pts.length >= 4) {
+    const span = Math.max(...task.pts.map((p) => p[0])) - Math.min(...task.pts.map((p) => p[0]));
+    if (span < 2) { task.pts.shift(); drawGraph(); say('Spread your readings out more: use low and high settings of the rheostat.', 'bad'); return; }
+    const opts = kit.shuffle([task.gR, ...[2, 3, 4, 5, 6, 8, 10].filter((x) => x !== task.gR).sort(() => Math.random() - 0.5).slice(0, 2)]);
+    setRow(opts.map((o) => ({ text: `R = ${o} Ω`, act: () => answerGraph(o) })));
+    drawTask('The points lie on a **straight line through the origin**: current is proportional to voltage. Read a point on the line: **R = V ÷ I**. Choose R below.');
+  }
+}
+function answerGraph(o) {
+  if (task.done) return;
+  if (o === task.gR) taskDone({ points: task.tries ? 8 : 20, success: `R = V ÷ I = ${task.gR} Ω. A straight line through the origin shows that V ∝ I: this is Ohm’s law.` });
+  else { task.tries++; score.streak = 0; say(`Not ${o} Ω. Pick a point on the line and divide its voltage by its current.`, 'bad'); }
+}
+const nudge = (d) => { const e = circ.edges.find((x) => x.id === 'rheo'); e.fixedObj.userData.setR(THREE.MathUtils.clamp(e.fixed.value + d, RHEO.min, RHEO.max)); };
 function answerX(o) {
   if (task.done) return;
   if (o === task.xValue) { taskDone({ points: task.tries ? 8 : 20, success: `R = V ÷ I = 6 V ÷ ${(6 / task.xValue).toFixed(2)} A = ${task.xValue} Ω.` }); }
@@ -536,6 +716,7 @@ const TERMS = { E: [0, 0.075], N: [-0.075, -0.035], L: [0.075, -0.035] };
 const WIRE_COL = { L: 0x8b4513, N: 0x1f5fbf, E: 0x3fa34d };
 const WIRE_NAME = { L: 'Brown (live) wire', N: 'Blue (neutral) wire', E: 'Green and yellow (earth) wire' };
 const termObjs = {}; const wireEnds = {};
+const LEAD_N = 12;
 {
   // plug body (shown three times life size, from the back with the cover off)
   const body = new THREE.Shape(); body.moveTo(-0.15, -0.14); body.lineTo(0.15, -0.14); body.lineTo(0.15, 0.13); body.quadraticCurveTo(0.15, 0.16, 0.12, 0.16); body.lineTo(-0.12, 0.16); body.quadraticCurveTo(-0.15, 0.16, -0.15, 0.13); body.closePath();
@@ -567,8 +748,13 @@ const termObjs = {}; const wireEnds = {};
     });
   }
   // fuse holder beside the live terminal
-  const fuse = mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.06, 14), mat(0xf5f0e0), 0.075, 0.035, 0.012); fuse.rotation.z = 0; fuse.userData.noHit = true;
-  plug.add(fuse);
+  const fuse = mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.06, 14), mat(0xe8e2d0), 0.075, 0.035, 0.012); fuse.rotation.z = 0; fuse.userData.noHit = true;
+  plug.add(fuse); plug.userData.fuse = fuse;
+  // brass clips that hold the fuse; in the fuse tasks they are the slot for a fuse cartridge
+  const clips = new THREE.Group(); clips.position.set(0.075, 0.035, 0.008);
+  for (const y of [-0.026, 0.026]) clips.add(mesh(new THREE.BoxGeometry(0.024, 0.008, 0.012), mat(0xd4a017, { metalness: 0.6, roughness: 0.3 }), 0, y, 0));
+  clips.add(mesh(new THREE.BoxGeometry(0.04, 0.08, 0.02), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }), 0, 0, 0.004));
+  plug.add(clips); plug.userData.clips = clips;
   const fuseTag = label('FUSE', { w: 0.05, h: 0.018, bg: null, fg: '#ffffff', font: 'bold 30px system-ui, sans-serif', res: 1600 }); fuseTag.position.set(0.075, 0.075, 0.012); noHit(fuseTag); plug.add(fuseTag);
   // the three wire ends, waiting near the cable
   const grip = new THREE.Vector3(0, -0.105, 0.012);
@@ -581,22 +767,34 @@ const termObjs = {}; const wireEnds = {};
     end.userData.wire = k;
     plug.add(end);
     // the flexible part from the grip to the end: a thin cylinder we stretch every frame
-    const lead = mesh(new THREE.CylinderGeometry(0.005, 0.005, 1, 8), lam(WIRE_COL[k]));
-    lead.userData.noHit = true; lead.raycast = () => {};
+    const lead = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.005, 0.005, 1, 8), mat(WIRE_COL[k], { roughness: 0.45 }), LEAD_N);
+    lead.userData.noHit = true; lead.raycast = () => {}; lead.frustumCulled = false;
     plug.add(lead);
     wireEnds[k] = { end, lead, grip: grip.clone().add(new THREE.Vector3((i - 1) * 0.015, 0, 0)) };
     kit.carryable(end, { name: WIRE_NAME[k], canPick: () => mode.kind === 'plug' && !end.userData.placed, holdOffset: new THREE.Vector3(0, 0, 0), holdScale: 1 });
   });
-  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _u = new THREE.Vector3(0, 1, 0);
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _u = new THREE.Vector3(0, 1, 0);
+  const _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(), _d = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
+  const _down = new THREE.Vector3(), _iq = new THREE.Quaternion();
+  const bez = (t, out) => out.set(0, 0, 0).addScaledVector(_a, (1 - t) * (1 - t)).addScaledVector(_c, 2 * t * (1 - t)).addScaledVector(_b, t * t);
   kit.tick(() => {
     if (!plug.visible) return;
+    plug.getWorldQuaternion(_iq).invert();
+    _down.set(0, -1, 0).applyQuaternion(_iq);           // "down" in the plug's own frame: cables sag under gravity
     for (const k in wireEnds) {
       const { end, lead, grip: gp } = wireEnds[k];
       _a.copy(gp); end.getWorldPosition(_b); plug.worldToLocal(_b);
-      const d = _b.clone().sub(_a); const len = Math.max(0.001, d.length());
-      lead.position.copy(_a).addScaledVector(d, 0.5);
-      lead.quaternion.setFromUnitVectors(_u, d.normalize());
-      lead.scale.set(1, len, 1);
+      // the cable leaves the end straight back from the brass tip
+      _b.add(_d.set(0, 0, -0.012).applyQuaternion(end.getWorldQuaternion(_q)).applyQuaternion(_iq));
+      const span = _a.distanceTo(_b);
+      _c.addVectors(_a, _b).multiplyScalar(0.5).addScaledVector(_down, Math.min(0.08, 0.02 + span * 0.25));
+      for (let i = 0; i < LEAD_N; i++) {
+        bez(i / LEAD_N, _p0); bez((i + 1) / LEAD_N, _p1);
+        _d.subVectors(_p1, _p0); const len = Math.max(0.0005, _d.length());
+        _q.setFromUnitVectors(_u, _d.normalize());
+        lead.setMatrixAt(i, _m.compose(_p0.add(_p1).multiplyScalar(0.5), _q, _s.set(1, len * 1.08, 1)));
+      }
+      lead.instanceMatrix.needsUpdate = true;
     }
   });
 }
@@ -620,26 +818,110 @@ function resetPlug() {
   }
   for (const k in termObjs) { termObjs[k].userData.filled = false; termObjs[k].userData.tag.visible = false; }
 }
+// ---------------------------------------------------------------- fuse cartridges and the appliances
+// Three cartridges wait on the table: 3 A (red), 5 A (black) and 13 A (brown). Put the right one in the plug.
+const fuseSet = new THREE.Group(); fuseSet.visible = false; scene.add(fuseSet);
+const cartridges = [[3, 0xc0392b], [5, 0x2b2b2b], [13, 0x7a4a2a]].map(([A, col], i) => {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.0115, 0.0115, 0.058, 18), mat(col, { roughness: 0.45 })));
+  for (const y of [-0.034, 0.034]) g.add(mesh(new THREE.CylinderGeometry(0.0122, 0.0122, 0.012, 18), mat(0xc9cfd4, { metalness: 0.85, roughness: 0.25 }), 0, y, 0));
+  // they stand in a rack, each above its label
+  const tag = label(`${A} A`, { w: 0.05, h: 0.022, bg: '#2b3138', fg: '#f3f2ee', font: 'bold 44px system-ui, sans-serif', res: 1600 });
+  tag.position.set(0.24 + i * 0.07, TABLE_Y + 0.015, -0.4 + 0.027); tag.rotation.x = -0.35; noHit(tag); fuseSet.add(tag);
+  g.position.set(0.24 + i * 0.07, TABLE_Y + 0.05, -0.41);
+  g.userData.fuseA = A;
+  fuseSet.add(g);
+  kit.carryable(g, { name: `${A} A fuse`, canPick: () => mode.kind === 'answer' && !!task.fuse && !g.userData.placed, holdOffset: new THREE.Vector3(0, 0.02, -0.01) });
+  return g;
+});
+{
+  const rack = mesh(new THREE.BoxGeometry(0.23, 0.03, 0.05), mat(0x8d969e, { metalness: 0.5, roughness: 0.35 }), 0.31, TABLE_Y + 0.015, -0.41); noHit(rack); fuseSet.add(rack);
+  const sh = kit.contactShadow(0.32, 0.12, 0.45); sh.position.set(0.31, TABLE_Y + 0.002, -0.41); fuseSet.add(sh);
+}
+kit.slot(plug.userData.clips, {
+  name: 'Fuse holder', reach: 0.06,
+  enabled: () => mode.kind === 'answer' && !!task.fuse && !task.done && !!kit.carry.item?.userData.fuseA,
+  accept: (item) => { const v = fuseVerdict(item.userData.fuseA); if (v.ok) return true; task.tries++; score.streak = 0; return v.msg; },
+  onPlace: (item) => {
+    item.userData.placed = true; item.userData.locked = true;
+    plug.userData.fuse.visible = false;
+    kit.settle(item, plug, new THREE.Vector3(0.075, 0.035, 0.014), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1).multiplyScalar(0.78 / 1.0), 0.2);
+    answerFuse(item.userData.fuseA, task.fuse.right, task.fuse.I, task.fuse.f);
+  },
+});
+function resetFuses() {
+  for (const c of cartridges) { if (kit.carry.item === c) kit.returnHome(c); c.userData.placed = false; c.userData.locked = false; const h = c.userData.home; h.parent.attach(c); c.position.copy(h.pos); c.quaternion.copy(h.quat); c.scale.copy(h.scale); }
+  plug.userData.fuse.visible = true;
+}
+// simple appliance models with their rating plates
+const appliances = {};
+{
+  const at = (g) => { g.position.set(-0.25, TABLE_Y, -0.5); g.rotation.y = 0.25; const sh = kit.contactShadow(0.26, 0.26, 0.5); sh.position.y = 0.002; g.add(sh); noHit(g); g.visible = false; scene.add(g); return g; };
+  const plate = (g, text, y = 0.02, z = 0.1) => { const l = label(text, { w: 0.15, h: 0.04, bg: '#2b3138', fg: '#f3f2ee', font: 'bold 32px system-ui, sans-serif' }); l.position.set(0, y, z); l.rotation.x = -0.6; g.add(l); };
+  const white = mat(0xd9d6cf, { roughness: 0.35 }), dark = mat(0x2b3138, { roughness: 0.45 }), steel = mat(0xc9cfd4, { metalness: 0.85, roughness: 0.25 });
+  // kettle
+  let g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.075, 0.08, 0.02, 32), dark, 0, 0.01, 0));
+  g.add(mesh(new THREE.LatheGeometry([[0, 0], [0.068, 0], [0.072, 0.03], [0.07, 0.11], [0.06, 0.15], [0.045, 0.16], [0, 0.16]].map(([x, y]) => new THREE.Vector2(x, y)), 32), steel, 0, 0.02, 0));
+  g.add(mesh(new THREE.TorusGeometry(0.05, 0.011, 10, 24, Math.PI), dark, -0.075, 0.1, 0).rotateZ(Math.PI / 2));
+  g.add(mesh(new THREE.ConeGeometry(0.018, 0.06, 14).rotateZ(-1.1), steel, 0.085, 0.13, 0));
+  g.add(mesh(new THREE.SphereGeometry(0.012, 12, 8), dark, 0, 0.185, 0));
+  plate(g, '2200 W · 230 V'); appliances.kettle = at(g);
+  // table lamp
+  g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.02, 32), dark, 0, 0.01, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.2, 10), steel, 0, 0.12, 0));
+  g.add(mesh(new THREE.LatheGeometry([[0.045, 0], [0.09, -0.09], [0.088, -0.092], [0.043, -0.002]].map(([x, y]) => new THREE.Vector2(x, y)), 32), mat(0xe8dcc0, { roughness: 0.7, side: THREE.DoubleSide }), 0, 0.3, 0));
+  g.add(mesh(new THREE.SphereGeometry(0.022, 14, 10), new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), 0, 0.235, 0));
+  plate(g, '60 W · 230 V'); appliances.lamp = at(g);
+  // iron
+  g = new THREE.Group();
+  const sole = new THREE.Shape(); sole.moveTo(-0.08, -0.045); sole.lineTo(0.05, -0.045); sole.quadraticCurveTo(0.11, -0.02, 0.12, 0); sole.quadraticCurveTo(0.11, 0.02, 0.05, 0.045); sole.lineTo(-0.08, 0.045); sole.closePath();
+  g.add(mesh(new THREE.ExtrudeGeometry(sole, { depth: 0.012, bevelEnabled: false }).rotateX(-Math.PI / 2), steel, 0, 0.0, 0));
+  g.add(mesh(new THREE.ExtrudeGeometry(sole, { depth: 0.04, bevelEnabled: true, bevelSize: 0.008, bevelThickness: 0.008 }).rotateX(-Math.PI / 2).scale(0.92, 1, 0.92), mat(0x2f7f8f, { roughness: 0.4 }), 0, 0.014, 0));
+  g.add(mesh(new THREE.TorusGeometry(0.045, 0.011, 10, 24, Math.PI), dark, -0.005, 0.07, 0));
+  plate(g, '1000 W · 230 V'); appliances.iron = at(g);
+  // heater
+  g = new THREE.Group();
+  g.add(mesh(new THREE.BoxGeometry(0.2, 0.15, 0.06), mat(0xd9d6cf, { roughness: 0.4 }), 0, 0.095, 0));
+  for (const y of [0.06, 0.095, 0.13]) g.add(mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.17, 10).rotateZ(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff7a3a }), 0, y, 0.032));
+  g.add(mesh(new THREE.BoxGeometry(0.22, 0.02, 0.09), dark, 0, 0.01, 0));
+  plate(g, '2 kW heater', 0.03, 0.075); appliances.heater = at(g);
+}
+function showAppliance(k) { for (const a in appliances) appliances[a].visible = a === k; }
 const FUSES = [
-  { name: 'Electric kettle', P: 2200 }, { name: 'Table lamp', P: 60 }, { name: 'Electric iron', P: 1000 },
+  { name: 'Electric kettle', P: 2200, model: 'kettle' }, { name: 'Table lamp', P: 60, model: 'lamp' }, { name: 'Electric iron', P: 1000, model: 'iron' },
 ];
+function fuseVerdict(a) {
+  const { right, I, f } = task.fuse;
+  if (a === right) return { ok: true };
+  return { ok: false, msg: a < right ? `A ${a} A fuse would blow in normal use: the ${f.name.toLowerCase()} takes ${I.toFixed(1)} A.` : `Too big: a ${a} A fuse would let a dangerous current flow before it blew. Work out I = P ÷ V.` };
+}
 function fuseTask(f) {
   const I = f.P / 230; const right = I <= 3 ? 3 : I <= 5 ? 5 : 13;
   return {
     title: `Choose the fuse: ${f.name.toLowerCase()}`, kind: 'answer',
     body: [`A **${f.name.toLowerCase()}** is rated **${f.P} W** on our **230 V** mains.`, 'Which fuse should its plug have? Pick the **smallest fuse that is bigger than the normal current**.', 'Current: I = P ÷ V'],
+    setup: () => { task.fuse = { right, I, f }; resetFuses(); fuseSet.visible = true; plug.visible = true; showAppliance(f.model); },
     row: () => [3, 5, 13].map((a) => ({ text: `${a} A fuse`, act: () => answerFuse(a, right, I, f) })),
-    footer: 'Fuses come in 3 A, 5 A and 13 A. Choose on the buttons in front of you.',
+    footer: 'Put the right fuse cartridge into the plug’s fuse holder, or choose on the buttons. Fuses come in 3 A, 5 A and 13 A.',
   };
 }
 function answerFuse(a, right, I, f) {
   if (task.done) return;
+  if (a === right && !cartridges.some((c) => c.userData.placed)) {
+    // pressing the button fits the cartridge for you
+    const c = cartridges.find((x) => x.userData.fuseA === a);
+    c.userData.placed = true; c.userData.locked = true; plug.userData.fuse.visible = false;
+    kit.settle(c, plug, new THREE.Vector3(0.075, 0.035, 0.014), new THREE.Quaternion(), new THREE.Vector3(0.78, 0.78, 0.78), 0.3);
+  }
   if (a === right) taskDone({ points: task.tries ? 3 : 10, success: `I = ${f.P} ÷ 230 = ${I.toFixed(2)} A, so a ${right} A fuse. A bigger fuse would not blow in time; a smaller one would blow in normal use.` });
-  else { task.tries++; score.streak = 0; say(a < right ? `A ${a} A fuse would blow in normal use: the ${f.name.toLowerCase()} takes ${I.toFixed(1)} A.` : `Too big: a ${a} A fuse would let a dangerous current flow before it blew. Work out I = P ÷ V.`, 'bad', 5); }
+  else { task.tries++; score.streak = 0; say(fuseVerdict(a).msg, 'bad', 5); }
 }
 const KWH = {
   title: 'Paying for electricity', kind: 'answer',
   body: ['A **2 kW** heater is left on for **3 hours**.', 'How much electrical energy does it use?', 'Energy (kWh) = power (kW) × time (h)'],
+  setup: () => { task.fuse = null; showAppliance('heater'); plug.visible = false; },
   row: () => kit.shuffle(['6 kWh', '0.67 kWh', '6000 kWh']).map((o) => ({ text: o, act: () => answerKwh(o) })),
   footer: 'Your electricity units are counted in kilowatt-hours (kWh).',
 };
@@ -658,10 +940,11 @@ function startLevel(title, list, notes) {
 function l1Start() { startLevel('Level 1', L1_TASKS, ['Series: one path, parts share the voltage. Parallel: separate branches, each gets the full voltage.']); }
 function l2Start() {
   task.xValue = [3, 4, 12][Math.floor(Math.random() * 3)];
+  task.gR = [4, 5, 8][Math.floor(Math.random() * 3)];
   startLevel('Level 2', L2_TASKS, ['Ohm’s law: V = I × R. In series resistances add; in parallel the branch currents add.']);
 }
 function l3Start() {
-  resetPlug();
+  resetPlug(); task.fuse = null;
   const plugTask = {
     title: 'Wire the plug', kind: 'plug',
     body: (w) => ['This is a 3-pin plug from the back, with the cover off. Connect each wire to the right terminal.', `Pick up a wire end (${w.pick}) and put it on a brass terminal (${w.place}).`, 'Remember the colour code: **brown**, **blue**, and **green and yellow**.'],
@@ -686,7 +969,7 @@ const flow = kit.levelFlow({
   },
   levels: [
     { title: 'Make it work', short: 'Circuits', max: 80, start: l1Start },
-    { title: 'Ohm’s law challenges', short: 'Ohm’s law', max: 60, start: l2Start },
+    { title: 'Ohm’s law challenges', short: 'Ohm’s law', max: 80, start: l2Start },
     { title: 'Safe at home', short: 'Safety', max: 70, start: l3Start },
   ],
 });
@@ -696,4 +979,4 @@ flow.showIntro();
 kit.onKind(() => { if (task.list.length && mode.kind !== 'done' && mode.kind !== 'idle') drawTask(); });
 kit.start();
 
-window.game = { kit, flow, mode, task, pieces, rowBtns, rowBtn, get circ() { return circ; }, get result() { return result; }, solve, termObjs, wireEnds, plug, cb, setSwitch, speed: 1 };
+window.game = { kit, flow, mode, task, pieces, rowBtns, rowBtn, get circ() { return circ; }, get result() { return result; }, solve, termObjs, wireEnds, plug, cb, setSwitch, cartridges, graphG, dots, meters, loadTask, speed: 1 };

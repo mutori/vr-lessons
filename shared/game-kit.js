@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { VRButton } from './vendor/VRButton.js';
 import { createXRInput, inputWords, distanceToObject } from './xr-input.js';
 import { createDebugHud } from './debug-hud.js';
+import { buildLab, makeEnvironment, softDiscTexture, glowTexture } from './lab-room.js';
 
 export { THREE };
 
@@ -36,15 +37,19 @@ export function createGame(opts = {}) {
   document.getElementById('loading')?.remove();
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(sky);
+  // the room encloses everything, so clear to black (cheapest clear on Quest)
+  scene.background = new THREE.Color(0x000000);
+  scene.environment = makeEnvironment(renderer);
+  scene.environmentIntensity = 0.55;
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 80);
   camera.position.set(0, deskSpot.height, 0);
   const rig = new THREE.Group();
   rig.add(camera);
   scene.add(rig);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a96a3, 2.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.3);
-  sun.position.set(2, 5, 3);
+  // one cheap directional light plus soft sky/ground fill; no real-time shadows (Meta WebXR guidance)
+  scene.add(new THREE.HemisphereLight(0xf4f1ea, 0x6f6a60, 1.25));
+  const sun = new THREE.DirectionalLight(0xfff2dc, 1.6);
+  sun.position.set(-3, 4, 1.5);
   scene.add(sun);
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -54,7 +59,8 @@ export function createGame(opts = {}) {
 
   // ---------------------------------------------------------------- small helpers
   const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.05, ...o });
-  const lam = (color, o = {}) => new THREE.MeshLambertMaterial({ color, ...o });
+  // matte by default; still picks up soft reflections from the room environment
+  const lam = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, ...o });
   const basic = (color, o = {}) => new THREE.MeshBasicMaterial({ color, ...o });
   function mesh(geo, material, x = 0, y = 0, z = 0) {
     const m = new THREE.Mesh(geo, material);
@@ -83,6 +89,9 @@ export function createGame(opts = {}) {
   function shuffle(a) { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
   const noHit = (o) => { o.traverse((c) => { c.userData.noHit = true; }); return o; };
 
+  // Meta's colour guidance: no pure white or pure black surfaces in the headset
+  const soft = (c) => (typeof c === 'string' && /^#(fff|ffffff)$/i.test(c) ? '#e8e6e0' : typeof c === 'string' && /^#(000|000000)$/i.test(c) ? '#1c1c1c' : c);
+  const softInk = (c) => (typeof c === 'string' && /^#(fff|ffffff)$/i.test(c) ? '#f3f2ee' : c);
   // ---------------------------------------------------------------- text on canvases
   function canvasPlane(w, h, res = 700) {
     const c = document.createElement('canvas');
@@ -143,6 +152,7 @@ export function createGame(opts = {}) {
     const p = canvasPlane(w, h, res);
     p.mesh.userData.draw = (t, color = bg, ink = fg) => {
       const { ctx, c } = p;
+      color = soft(color); ink = softInk(ink);
       ctx.clearRect(0, 0, c.width, c.height);
       if (color) { ctx.fillStyle = color; roundRect(ctx, 2, 2, c.width - 4, c.height - 4, Math.min(radius, c.height / 3)); ctx.fill(); }
       ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -173,8 +183,15 @@ export function createGame(opts = {}) {
     g.userData.face = face; g.userData.size = { w, h }; g.userData.isButton = true;
     g.userData.draw = (t, color = bg, ink = fg) => {
       const { ctx, c } = p;
+      ink = softInk(ink);
       ctx.clearRect(0, 0, c.width, c.height);
-      ctx.fillStyle = color; roundRect(ctx, 4, 4, c.width - 8, c.height - 8, 30); ctx.fill();
+      const base = new THREE.Color(color);
+      const lite = '#' + base.clone().offsetHSL(0, 0, 0.09).getHexString(), dark = '#' + base.clone().offsetHSL(0, 0, -0.12).getHexString();
+      ctx.fillStyle = dark; roundRect(ctx, 4, 4, c.width - 8, c.height - 8, 30); ctx.fill();
+      const gr = ctx.createLinearGradient(0, 0, 0, c.height);
+      gr.addColorStop(0, lite); gr.addColorStop(1, color);
+      ctx.fillStyle = gr; roundRect(ctx, 10, 10, c.width - 20, c.height - 22, 26); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.16)'; roundRect(ctx, 18, 14, c.width - 36, (c.height - 28) * 0.42, 20); ctx.fill();
       ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       // wrap, and shrink the font until every line fits the face
       let size = parseInt(font.match(/(\d+)px/)[1], 10);
@@ -224,49 +241,47 @@ export function createGame(opts = {}) {
     tone,
     click: () => tone(1200, 0.05, 'square', 0.04),
     tick: () => tone(2000, 0.02, 'square', 0.02),
-    good: () => { tone(660, 0.12, 'sine', 0.15); tone(990, 0.2, 'sine', 0.15, null, 0.1); },
-    bad: () => tone(160, 0.25, 'square', 0.08),
-    pick: () => tone(500, 0.12, 'sine', 0.08, 900),
-    drop: () => tone(700, 0.1, 'sine', 0.08, 400),
+    good: () => { [523, 659, 784].forEach((f, i) => { tone(f, 0.28, 'sine', 0.11, null, i * 0.07); tone(f * 2, 0.2, 'triangle', 0.03, null, i * 0.07); }); },
+    bad: () => { tone(220, 0.18, 'triangle', 0.12, 150); tone(165, 0.22, 'triangle', 0.08, 110, 0.12); },
+    pick: () => { tone(520, 0.09, 'sine', 0.07, 880); tone(1320, 0.05, 'sine', 0.02, null, 0.03); },
+    drop: () => { tone(760, 0.08, 'sine', 0.07, 420); tone(300, 0.1, 'triangle', 0.04, null, 0.04); },
+    spark: () => { for (let i = 0; i < 4; i++) tone(1600 + Math.random() * 1400, 0.06, 'sine', 0.025, null, i * 0.04); },
     whoosh: () => tone(300, 0.25, 'sawtooth', 0.03, 120),
     fanfare: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.13, null, i * 0.12)); },
     star: (i = 0) => tone(880 + i * 220, 0.18, 'triangle', 0.12),
   };
 
   // ---------------------------------------------------------------- room and furniture
-  function buildRoom({ sign = title.toUpperCase(), accent = 0x5d7f6e, wall = 0xeef1ea, floorA = '#c9cfd4', floorB = '#bcc3c9', signBg = '#1d4e6e' } = {}) {
-    const fc = document.createElement('canvas'); fc.width = fc.height = 256;
-    const fx = fc.getContext('2d');
-    fx.fillStyle = floorA; fx.fillRect(0, 0, 256, 256);
-    fx.fillStyle = floorB; fx.fillRect(0, 0, 128, 128); fx.fillRect(128, 128, 128, 128);
-    const ft = new THREE.CanvasTexture(fc);
-    ft.wrapS = ft.wrapT = THREE.RepeatWrapping; ft.repeat.set(6, 6); ft.colorSpace = THREE.SRGBColorSpace;
-    const room = new THREE.Group();
-    const floor = mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshLambertMaterial({ map: ft }));
-    floor.rotation.x = -Math.PI / 2;
-    room.add(floor);
-    const wallM = lam(wall);
-    for (const [x, z, r] of [[0, -5, 0], [0, 5, Math.PI], [-5, 0, Math.PI / 2], [5, 0, -Math.PI / 2]]) {
-      const w = mesh(new THREE.PlaneGeometry(10, 3.4), wallM, x, 1.7, z); w.rotation.y = r; room.add(w);
-      const sk = mesh(new THREE.PlaneGeometry(10, 0.9), lam(accent), x * 0.999, 0.45, z * 0.999); sk.rotation.y = r; room.add(sk);
-    }
-    const ceil = mesh(new THREE.PlaneGeometry(10, 10), lam(0xf7f7f4), 0, 3.4, 0); ceil.rotation.x = Math.PI / 2; room.add(ceil);
-    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) room.add(mesh(new THREE.BoxGeometry(1.2, 0.04, 0.4), basic(0xffffff), i * 3, 3.38, j * 3));
-    for (let i = -1; i <= 1; i += 2) {
-      const win = mesh(new THREE.PlaneGeometry(1.4, 1.1), basic(0xbfe3ff), -4.98, 2.0, i * 2.2); win.rotation.y = Math.PI / 2; room.add(win);
-      const win2 = mesh(new THREE.PlaneGeometry(1.4, 1.1), basic(0xbfe3ff), 4.98, 2.0, i * 2.2); win2.rotation.y = -Math.PI / 2; room.add(win2);
-    }
-    const s = label(sign, { w: 3.6, h: 0.36, bg: signBg, fg: '#ffffff', font: 'bold 120px system-ui, sans-serif', res: 300 });
-    s.position.set(0, 2.95, -4.97); room.add(s);
-    noHit(room);
-    scene.add(room);
-    return room;
+  let lab = null;
+  function buildRoom({ sign = title.toUpperCase(), accent = 0x5d7f6e, wall = 0xe6e2d8, signBg = '#1d4e6e' } = {}) {
+    lab = buildLab({ scene, title, sign, accent, signBg, wall });
+    tickers.push((dt, t) => lab.update(dt, t));
+    return lab.room;
   }
-  function table({ w = 1.3, d = 0.62, h = 0.8, x = 0, z = -0.55, top = 0xd9c7a3, legs = 0x4b5a66 } = {}) {
+  // soft contact shadow: a blurred dark disc just above a surface (a baked look, no shadow maps)
+  const shadowTex = softDiscTexture('rgba(20,16,10,0.6)');
+  function contactShadow(w, d, opacity = 0.7) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity }));
+    m.rotation.x = -Math.PI / 2; m.renderOrder = 1; noHit(m);
+    return m;
+  }
+  // A school lab bench: black epoxy worktop on a cabinet with doors and steel handles.
+  function table({ w = 1.3, d = 0.62, h = 0.8, x = 0, z = -0.55 } = {}) {
     const g = new THREE.Group();
-    g.add(mesh(new THREE.BoxGeometry(w, 0.04, d), lam(top), 0, h - 0.02, 0));
-    const lm = lam(legs);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.04, h - 0.04, 0.04), lm, sx * (w / 2 - 0.05), (h - 0.04) / 2, sz * (d / 2 - 0.05)));
+    const top = mesh(new THREE.BoxGeometry(w, 0.035, d), mat(0x2b3034, { roughness: 0.3, metalness: 0.05 }), 0, h - 0.0175, 0);
+    const lip = mesh(new THREE.BoxGeometry(w + 0.012, 0.012, d + 0.012), mat(0x1f2326, { roughness: 0.4 }), 0, h - 0.03, 0);
+    const body = mesh(new THREE.BoxGeometry(w - 0.06, h - 0.13, d - 0.08), lam(0xd9d4c7), 0, (h - 0.13) / 2 + 0.08, -0.01);
+    const kick = mesh(new THREE.BoxGeometry(w - 0.1, 0.08, d - 0.14), lam(0x33383d), 0, 0.04, -0.02);
+    g.add(top, lip, body, kick);
+    const doorM = lam(0xb58a5c, { roughness: 0.6 }), steel = mat(0xc9ced3, { metalness: 0.8, roughness: 0.3 });
+    const n = Math.max(2, Math.round(w / 0.45));
+    for (const side of [1, -1]) for (let i = 0; i < n; i++) {
+      const dx = -w / 2 + 0.03 + (i + 0.5) * ((w - 0.06) / n);
+      const door = mesh(new THREE.BoxGeometry((w - 0.06) / n - 0.01, h - 0.2, 0.014), doorM, dx, (h - 0.2) / 2 + 0.1, side * ((d - 0.08) / 2 - 0.003));
+      const handle = mesh(new THREE.BoxGeometry(0.1, 0.012, 0.018), steel, dx, h - 0.2, side * ((d - 0.08) / 2 + 0.008));
+      g.add(door, handle);
+    }
+    const sh = contactShadow(w + 0.35, d + 0.35, 0.55); sh.position.y = 0.003; g.add(sh);
     g.position.set(x, 0, z);
     g.userData.topY = h;
     noHit(g);
@@ -278,20 +293,27 @@ export function createGame(opts = {}) {
   // A large canvas board. draw({ heading, level, body, items, footer, tone }) redraws it.
   function makeBoard({ w = 1.5, h = 0.86, res = 1000 } = {}) {
     const g = new THREE.Group();
-    const frame = mesh(new THREE.BoxGeometry(w + 0.04, h + 0.04, 0.03), lam(0x2a3a48), 0, 0, -0.018);
+    // a slim display on a floor stand
+    const frame = mesh(new THREE.BoxGeometry(w + 0.05, h + 0.05, 0.035), mat(0x2a3138, { roughness: 0.45, metalness: 0.2 }), 0, 0, -0.02);
     const p = canvasPlane(w, h, res);
     g.add(frame, p.mesh);
+    const poleM = mat(0x8d969e, { metalness: 0.7, roughness: 0.35 });
+    for (const sx of [-1, 1]) {
+      g.add(mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.5, 12), poleM, sx * (w / 2 - 0.2), -h / 2 - 0.75, -0.05));
+      g.add(mesh(new THREE.BoxGeometry(0.08, 0.03, 0.5), poleM, sx * (w / 2 - 0.2), -h / 2 - 1.5 + 0.015, -0.05));
+    }
     noHit(g);
     let last = {};
     function draw(d = last) {
       last = d;
       const { ctx, c } = p; const W = c.width, H = c.height, s = W / 1500;
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = '#fbfaf5'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#1f2b35'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fillRect(0, 110 * s, W, 8 * s);
       // header bar
-      const toneCol = { good: '#1e8449', bad: '#b03a2e', info: '#1d4e6e' }[d.tone || 'info'] || d.tone;
+      const toneCol = { good: '#2a7d4f', bad: '#a8443a', info: '#2b5d80' }[d.tone || 'info'] || d.tone;
       ctx.fillStyle = toneCol; ctx.fillRect(0, 0, W, 110 * s);
-      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#f3f2ee'; ctx.textBaseline = 'middle';
       ctx.textAlign = 'right'; ctx.font = `bold ${44 * s}px system-ui, sans-serif`;
       ctx.fillText(`Score ${score.points}`, W - 34 * s, 56 * s);
       let rightW = ctx.measureText(`Score ${score.points}`).width + 34 * s;
@@ -306,7 +328,7 @@ export function createGame(opts = {}) {
       do { ctx.font = `bold ${hs * s}px system-ui, sans-serif`; hs -= 2; } while (ctx.measureText(d.heading || title).width > W - rightW - 34 * s - 40 * s && hs > 26);
       ctx.fillText(d.heading || title, 34 * s, 56 * s);
       // body
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#13293d';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#e4e8ea';
       let y = 190 * s;
       const bodyFont = `${d.big ? 50 : 42}px system-ui, sans-serif`.replace(/(\d+)px/, (_, n) => `${n * s}px`);
       for (const para of [].concat(d.body || [])) {
@@ -318,10 +340,10 @@ export function createGame(opts = {}) {
         y += 6 * s;
         const f = `${38 * s}px system-ui, sans-serif`;
         for (const it of d.items) {
-          const col = it.state === 'done' ? '#1e8449' : it.state === 'now' ? '#b9770e' : it.state === 'bad' ? '#b03a2e' : '#7b8a97';
+          const col = it.state === 'done' ? '#3fa36a' : it.state === 'now' ? '#e0a83a' : it.state === 'bad' ? '#d9604f' : '#5f7282';
           ctx.fillStyle = col; ctx.beginPath(); ctx.arc(58 * s, y - 13 * s, 13 * s, 0, Math.PI * 2); ctx.fill();
           if (it.state === 'done') { ctx.strokeStyle = '#fff'; ctx.lineWidth = 4 * s; ctx.beginPath(); ctx.moveTo(51 * s, y - 13 * s); ctx.lineTo(57 * s, y - 6 * s); ctx.lineTo(66 * s, y - 20 * s); ctx.stroke(); }
-          ctx.fillStyle = it.state === 'todo' ? '#5d6d7e' : '#13293d';
+          ctx.fillStyle = it.state === 'todo' ? '#9fb0bd' : '#e8ecee';
           ctx.font = it.state === 'now' ? f.replace(/^/, 'bold ') : f;
           y = wrapText(ctx, it.text, 90 * s, y, W - 130 * s, 48 * s, { font: ctx.font });
           y += 6 * s;
@@ -331,13 +353,14 @@ export function createGame(opts = {}) {
         // fit the footer in the bottom strip: shrink a little, then grow upwards if it still needs a third line
         let fs = 34, n = 0;
         for (; fs >= 26; fs -= 2) {
-          ctx.font = `italic ${fs * s}px system-ui, sans-serif`;
+          ctx.font = `${fs * s}px system-ui, sans-serif`;
           n = Math.round((wrapText(ctx, d.footer, 0, 0, W - 80 * s, 1, { draw: false, font: ctx.font })));
           if (n <= 2) break;
         }
         if (fs < 26) fs = 26;
         const lh = fs * 1.3 * s;
-        ctx.font = `italic ${fs * s}px system-ui, sans-serif`; ctx.fillStyle = '#4a5a68';
+        ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(0, H - 36 * s - (Math.max(1, n)) * lh, W, 36 * s + Math.max(1, n) * lh);
+        ctx.font = `${fs * s}px system-ui, sans-serif`; ctx.fillStyle = '#b4c1ca';
         wrapText(ctx, d.footer, 40 * s, H - 26 * s - (Math.max(1, n) - 1) * lh, W - 80 * s, lh, { font: ctx.font });
       }
       if (d.stars != null) drawStars(ctx, W - 300 * s, H - 150 * s, 80 * s, d.stars);
@@ -352,7 +375,7 @@ export function createGame(opts = {}) {
           ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
         }
         ctx.closePath();
-        ctx.fillStyle = i < n ? '#f4c20d' : '#d5dbe0'; ctx.fill();
+        ctx.fillStyle = i < n ? '#f2c230' : '#3d4b56'; ctx.fill();
         ctx.strokeStyle = '#8a6d00'; ctx.lineWidth = 2; ctx.stroke();
       }
     }
@@ -365,7 +388,9 @@ export function createGame(opts = {}) {
     add(n, at = null) {
       this.points = Math.max(0, this.points + n);
       if (n > 0) { this.streak++; } else this.streak = 0;
-      if (at && n) popText((n > 0 ? '+' : '') + n, at, n > 0 ? '#1e8449' : '#b03a2e');
+      if (at && n) popText((n > 0 ? '+' : '') + n, at, n > 0 ? '#3fbf6f' : '#e06a5a');
+      if (at && n > 0) { sparkle(at, n >= 15 ? 26 : 16); sfx.spark(); }
+      pulse(n > 0 ? 0.55 : 0.35, n > 0 ? 70 : 140);
       boards.forEach((b) => b.redraw());
     },
     reset() { this.points = 0; this.streak = 0; boards.forEach((b) => b.redraw()); },
@@ -385,6 +410,31 @@ export function createGame(opts = {}) {
     tween(1.1, (k) => { l.position.y = y0 + k * 0.12; l.material.opacity = 1 - k * k; l.quaternion.copy(camera.getWorldQuaternion(new THREE.Quaternion())); }, (k) => k)
       .then(() => { scene.remove(l); l.geometry.dispose(); l.material.map.dispose(); l.material.dispose(); });
   }
+  // sparkles: small additive stars that fly out and fade (cheap: a handful of sprites, short-lived)
+  const sparkTex = glowTexture('255,236,160');
+  const sparkMat = new THREE.SpriteMaterial({ map: sparkTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const sparks = [];
+  function sparkle(at, n = 16, color = 0xffe08a) {
+    const p0 = at.isVector3 ? at.clone() : at.getWorldPosition(new THREE.Vector3());
+    for (let i = 0; i < n; i++) {
+      const sp = new THREE.Sprite(sparkMat.clone()); sp.material.color.set(color);
+      sp.position.copy(p0); sp.userData.noHit = true; sp.renderOrder = 985;
+      const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.1, Math.random() - 0.5).normalize();
+      sp.userData.v = dir.multiplyScalar(0.25 + Math.random() * 0.35); sp.userData.life = 0.55 + Math.random() * 0.3; sp.userData.max = sp.userData.life;
+      sp.scale.setScalar(0.02 + Math.random() * 0.02);
+      scene.add(sp); sparks.push(sp);
+    }
+  }
+  function updateSparks(dt) {
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const sp = sparks[i];
+      sp.userData.v.y -= 0.5 * dt; sp.position.addScaledVector(sp.userData.v, dt);
+      sp.userData.life -= dt; sp.material.opacity = Math.max(0, sp.userData.life / sp.userData.max);
+      if (sp.userData.life <= 0) { scene.remove(sp); sp.material.dispose(); sparks.splice(i, 1); }
+    }
+  }
+  // a short buzz on every controller that has a motor
+  function pulse(intensity = 0.5, ms = 60) { if (input && renderer.xr.isPresenting) for (const p of input.pointers) input.haptic(p, intensity, ms); }
   // confetti burst
   const confGeo = new THREE.BoxGeometry(0.012, 0.012, 0.003);
   const confMats = [0xf4c20d, 0x2ecc71, 0x3498db, 0xe74c3c, 0x9b59b6].map((c) => basic(c, { side: THREE.DoubleSide }));
@@ -584,11 +634,45 @@ export function createGame(opts = {}) {
     returnHome(carry.item);
   }
 
+  const tickers0 = [];
+  // ---------------------------------------------------------------- dragging (levers, sliders, turntables)
+  // draggable(obj, { name, onStart(point, p), onMove(point, p), onEnd(p), enabled, plane(point) -> THREE.Plane })
+  // Hands: pinch the handle and move. Rays and the mouse: press on it and move; the point is found on
+  // a plane through the grab point (facing the viewer unless plane() is given).
+  const dragState = { obj: null, src: null, p: null, plane: new THREE.Plane(), pt: new THREE.Vector3() };
+  function draggable(obj, o = {}) {
+    obj.userData.drag = o;
+    obj.userData.interactive = { name: o.name || '', onSelect: null, enabled: o.enabled || (() => true), kind: 'drag' };
+    interactables.push(obj);
+    obj.userData._handles = [input.addNearTarget(obj, {
+      onPinch: (p) => beginDrag(obj, 'near', p, p.pinchPoint), onDrag: (p) => moveDrag(p.pinchPoint, p), onRelease: (p) => endDrag(p),
+      enabled: () => obj.userData.interactive.enabled() && !carry.item, priority: o.priority ?? 1, distance: o.distance || null,
+    })];
+    return obj;
+  }
+  function beginDrag(obj, src, p, point) {
+    const o = obj.userData.drag; if (!o || !obj.userData.interactive.enabled()) return;
+    ac();
+    dragState.obj = obj; dragState.src = src; dragState.p = p;
+    if (o.plane) dragState.plane.copy(o.plane(point));
+    else { const n = camera.getWorldPosition(new THREE.Vector3()).sub(point).normalize(); dragState.plane.setFromNormalAndCoplanarPoint(n, point); }
+    sfx.tick();
+    o.onStart?.(point.clone(), p);
+    o.onMove?.(point.clone(), p);
+  }
+  function moveDrag(point, p) { if (dragState.obj) dragState.obj.userData.drag.onMove?.(point.clone(), p); }
+  function endDrag(p) { const obj = dragState.obj; if (!obj) return; dragState.obj = null; obj.userData.drag.onEnd?.(p); sfx.tick(); }
+  function rayDragPoint(ray) { return ray.intersectPlane(dragState.plane, dragState.pt); }
+  tickers0.push(() => {
+    if (dragState.obj && dragState.src === 'ray' && dragState.p) { const q = rayDragPoint(dragState.p.worldRay); if (q) moveDrag(q, dragState.p); }
+  });
+
   // ---------------------------------------------------------------- input
   input = createXRInput({
     renderer, scene, camera, parent: rig,
     pickRay: (ray) => hitTest(ray.origin, ray.direction),
-    onRaySelect: (p, hit) => activate(hit.root, p),
+    onRaySelect: (p, hit) => (hit.root.userData.drag ? beginDrag(hit.root, 'ray', p, hit.point) : activate(hit.root, p)),
+    onRayRelease: (p) => { if (dragState.obj && dragState.src === 'ray' && dragState.p === p) endDrag(p); },
     onHeldPress: (p, source, hit) => heldPress(p, hit),
     heldFocus: (p) => (carry.item && carry.hand === p ? nearestSlot(carry.item, p) : null),
     extraNear: () => false,
@@ -670,9 +754,12 @@ export function createGame(opts = {}) {
     drag = { x: e.clientX, y: e.clientY, moved: 0 };
     try { el.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
     mouse.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    const h = desktopRay();
+    if (h && h.root.userData.drag && !carry.item) { drag = null; beginDrag(h.root, 'mouse', null, h.point); }
   });
   el.addEventListener('pointermove', (e) => {
     mouse.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    if (dragState.obj && dragState.src === 'mouse') { raycaster.setFromCamera(mouse, camera); const q = rayDragPoint(raycaster.ray); if (q) moveDrag(q, null); return; }
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       drag.moved += Math.abs(dx) + Math.abs(dy); drag.x = e.clientX; drag.y = e.clientY;
@@ -682,7 +769,10 @@ export function createGame(opts = {}) {
       }
     }
   });
-  el.addEventListener('pointerup', () => { if (drag && drag.moved <= 6) desktopClick(); drag = null; });
+  el.addEventListener('pointerup', () => {
+    if (dragState.obj && dragState.src === 'mouse') { endDrag(null); return; }
+    if (drag && drag.moved <= 6) desktopClick(); drag = null;
+  });
   function desktopRay() {
     raycaster.setFromCamera(mouse, camera);
     return hitTest(raycaster.ray.origin.clone(), raycaster.ray.direction.clone());
@@ -728,8 +818,9 @@ export function createGame(opts = {}) {
       updateTweens(dt);
       input.update();
       if (renderer.xr.isPresenting) { updateThumbsticks(); updateXRHover(); } else updateDesktop(dt);
+      for (const f of tickers0) f(dt, time);
       for (const f of tickers) f(dt, time);
-      updateConfetti(dt);
+      updateConfetti(dt); updateSparks(dt);
       if (toast.visible) {
         toastTimer -= dt;
         toast.position.copy(renderer.xr.isPresenting && toastAnchorVR ? toastAnchorVR : toastAnchor);
@@ -757,19 +848,22 @@ export function createGame(opts = {}) {
     const pod = new THREE.Group();
     pod.position.copy(podPos); pod.rotation.set(0, podYaw, 0, 'YXZ');
     const tilt = new THREE.Group(); tilt.rotation.x = -0.55; pod.add(tilt);
-    const back = mesh(new THREE.BoxGeometry(0.27, 0.36, 0.02), lam(0x2a3a48), 0, 0, -0.02); noHit(back); tilt.add(back);
+    // the panel grows with the number of levels
+    const STEP = levels.length > 4 ? 0.062 : 0.075, BH = levels.length > 4 ? 0.052 : 0.062;
+    const podH = levels.length * STEP + 0.08, top = podH / 2 - 0.045;
+    const back = mesh(new THREE.BoxGeometry(0.27, podH, 0.02), mat(0x2b3138, { roughness: 0.5 }), 0, 0, -0.02); noHit(back); tilt.add(back);
     const btns = [];
     const state = { index: -1, startPoints: 0, done: levels.map(() => false), stars: levels.map(() => 0), finished: false };
     const best = loadBest(key) || { points: 0 };
     levels.forEach((lv, i) => {
-      const bt = button(`${i + 1}. ${lv.short}`, 0.24, 0.062, { font: 'bold 22px system-ui, sans-serif', bg: '#34506b' });
-      bt.position.set(0, 0.135 - i * 0.075, 0);
+      const bt = button(`${i + 1}. ${lv.short}`, 0.24, BH, { font: 'bold 22px system-ui, sans-serif', bg: '#34506b' });
+      bt.position.set(0, top - i * STEP, 0);
       tilt.add(bt);
       interactive(bt, { name: `Level ${i + 1}: ${lv.title}`, onSelect: () => go(i) });
       btns.push(bt);
     });
     const restart = button('Restart level', 0.24, 0.05, { font: 'bold 20px system-ui, sans-serif', bg: '#7b8a97' });
-    restart.position.set(0, 0.135 - levels.length * 0.075 + 0.005, 0);
+    restart.position.set(0, top - levels.length * STEP + (STEP - 0.05) / 2 + 0.004, 0);
     tilt.add(restart);
     interactive(restart, { name: 'Restart this level', onSelect: () => { if (state.index >= 0) go(state.index); }, enabled: () => state.index >= 0 });
     scene.add(pod);
@@ -813,8 +907,9 @@ export function createGame(opts = {}) {
       const all = state.done.every(Boolean);
       if (all && score.points > best.points) { best.points = score.points; saveBest(key, best); }
       paint();
-      sfx.fanfare();
+      sfx.fanfare(); pulse(0.8, 160);
       burst(new THREE.Vector3(0, 1.3, -1.0), 60);
+      sparkle(new THREE.Vector3(-0.3, 1.35, -1.0), 30); sparkle(new THREE.Vector3(0.3, 1.35, -1.0), 30);
       const nextTxt = i < levels.length - 1 ? `Press **${i + 2}. ${levels[i + 1].short}** on the left to go on.` : 'You have finished every level. Well done!';
       b.draw({
         heading: `Level ${i + 1} complete!`, tone: 'good', big: true,
@@ -834,8 +929,8 @@ export function createGame(opts = {}) {
     THREE, renderer, scene, camera, rig, input, sfx, ac, tone,
     mat, lam, basic, mesh, tween, wait, colorTo, shuffle, ease, noHit,
     canvasPlane, roundRect, wrapText, label, button,
-    buildRoom, table, board, score, say, popText, burst,
-    interactive, uninteractive, carryable, slot, pick, returnHome, settle, carry, slots, storeHome, activate, hitTest,
+    buildRoom, table, board, score, say, popText, burst, sparkle, pulse, contactShadow, glowTexture,
+    interactive, uninteractive, carryable, slot, draggable, get dragging() { return dragState.obj; }, pick, returnHome, settle, carry, slots, storeHome, activate, hitTest,
     tick: (f) => tickers.push(f), start, placeLearner, onKind: (f) => kindListeners.push(f),
     words: () => inputWords(input.kind), get kind() { return input.kind; },
     setToastAnchor: (v, vr = null) => { toastAnchor.copy(v); toastAnchorVR = vr ? vr.clone() : null; }, get lastSaid() { return lastSaid; },

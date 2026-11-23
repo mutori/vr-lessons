@@ -18,33 +18,44 @@ const chamber = new THREE.Group();
 chamber.position.set(CH.x, TABLE_Y + 0.035, CH.z);
 scene.add(chamber);
 {
-  const glass = new THREE.MeshStandardMaterial({ color: 0xd8ecff, transparent: true, opacity: 0.16, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide });
+  // glass box with polished steel corner posts (reflections come from the room environment)
+  const glass = new THREE.MeshStandardMaterial({ color: 0xcfe6f7, transparent: true, opacity: 0.13, roughness: 0.04, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.6 });
   const box = mesh(new THREE.BoxGeometry(CH.w, CH.h, CH.d), glass, 0, CH.h / 2, 0);
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(CH.w, CH.h, CH.d)), new THREE.LineBasicMaterial({ color: 0x5d7e9a }));
-  edges.position.y = CH.h / 2;
-  const lid = mesh(new THREE.BoxGeometry(CH.w + 0.02, 0.015, CH.d + 0.02), lam(0x445566), 0, CH.h + 0.008, 0);
-  chamber.add(box, edges, lid);
+  box.renderOrder = 3;
+  const steel = mat(0xb9c2c9, { metalness: 0.85, roughness: 0.28 });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) chamber.add(mesh(new THREE.BoxGeometry(0.012, CH.h, 0.012), steel, sx * CH.w / 2, CH.h / 2, sz * CH.d / 2));
+  for (const sz of [-1, 1]) chamber.add(mesh(new THREE.BoxGeometry(CH.w + 0.012, 0.012, 0.012), steel, 0, CH.h, sz * CH.d / 2));
+  for (const sx of [-1, 1]) chamber.add(mesh(new THREE.BoxGeometry(0.012, 0.012, CH.d), steel, sx * CH.w / 2, CH.h, 0));
+  const lid = mesh(new THREE.BoxGeometry(CH.w + 0.03, 0.014, CH.d + 0.03), mat(0x3b4752, { metalness: 0.4, roughness: 0.4 }), 0, CH.h + 0.013, 0);
+  chamber.add(box, lid);
 }
-// heater plate under the chamber
-const plateMat = new THREE.MeshStandardMaterial({ color: 0x555b61, emissive: 0x000000, roughness: 0.5 });
-const plate = mesh(new THREE.BoxGeometry(CH.w + 0.04, 0.03, CH.d + 0.04), plateMat, 0, -0.018, 0);
+// the hotplate unit under the chamber: enamelled body, ceramic top with coils, a slider on its front
+const hotplate = mesh(new THREE.BoxGeometry(CH.w + 0.1, 0.05, CH.d + 0.16), mat(0xd9d6cf, { roughness: 0.45 }), 0, -0.04, 0.03);
+chamber.add(hotplate);
+const plateMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, emissive: 0x000000, roughness: 0.35, metalness: 0.2 });
+const plate = mesh(new THREE.BoxGeometry(CH.w + 0.03, 0.012, CH.d + 0.03), plateMat, 0, -0.009, 0);
 chamber.add(plate);
-const coilMat = basic(0x333333);
+const coilMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
 for (let i = 0; i < 4; i++) {
   const coil = mesh(new THREE.TorusGeometry(0.03 + i * 0.03, 0.004, 6, 40), coilMat, 0, -0.002, 0);
   coil.rotation.x = Math.PI / 2; coil.scale.set(1, 0.6, 1); chamber.add(coil);
 }
-const chamberLabel = label('Water', { w: 0.3, h: 0.05, bg: '#ffffff', fg: '#13293d', font: 'bold 34px system-ui, sans-serif' });
-chamberLabel.position.set(0, CH.h + 0.055, 0); chamber.add(chamberLabel);
-const stateLabel = label('SOLID', { w: 0.3, h: 0.05, bg: '#1d4e6e', fg: '#ffffff', font: 'bold 34px system-ui, sans-serif' });
-stateLabel.position.set(0, CH.h + 0.108, 0); chamber.add(stateLabel);
+// a name plate and a state read-out on the hotplate's front edge
+const plaque = new THREE.Group(); plaque.position.set(0, -0.032, CH.d / 2 + 0.135); plaque.rotation.x = -0.45; chamber.add(plaque);
+plaque.add(mesh(new THREE.BoxGeometry(0.36, 0.048, 0.006), mat(0x2b3138, { roughness: 0.5 }), 0, 0, -0.004));
+const chamberLabel = label('Water', { w: 0.15, h: 0.036, bg: '#dfe4e6', fg: '#13293d', font: 'bold 34px system-ui, sans-serif' });
+chamberLabel.position.set(-0.085, 0, 0); plaque.add(chamberLabel);
+const stateLabel = label('SOLID', { w: 0.17, h: 0.036, bg: '#1d4e6e', fg: '#ffffff', font: 'bold 34px system-ui, sans-serif' });
+stateLabel.position.set(0.085, 0, 0); plaque.add(stateLabel);
 noHit(chamber);
 
 // particles
 const N = 64, R = 0.019, SP = 0.043;
 const pGeo = new THREE.SphereGeometry(R, 16, 12);
-const pMat = new THREE.MeshStandardMaterial({ color: 0x3a8fd9, roughness: 0.35 });
+// white base colour: each particle's own instance colour shows its substance and how fast it moves
+const pMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0.05 });
 const parts = new THREE.InstancedMesh(pGeo, pMat, N);
+for (let i = 0; i < N; i++) parts.setColorAt(i, new THREE.Color(0x3a8fd9));
 parts.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 parts.userData.noHit = true; parts.raycast = () => {};
 chamber.add(parts);
@@ -101,7 +112,6 @@ function stateName(c) {
 }
 function setSubstance(key, Q) {
   sim.sub = SUBSTANCES[key]; sim.Q = Q; sim.heater = 0; sim.history = []; sim.histT = 0;
-  pMat.color.set(sim.sub.color);
   chamberLabel.userData.draw(sim.sub.name);
   const c = counts(Q);
   // place particles straight into their states
@@ -123,6 +133,8 @@ function stepParticles(dt) {
   const c = counts(sim.Q);
   for (const p of P) p.state = p.rank < c.g ? 2 : p.rank < c.g + c.l ? 1 : 0;
   const heat = THREE.MathUtils.clamp((T + 30) / 170, 0.05, 1);
+  findPushers();
+  let touched = false;
   const sub = Math.min(3, Math.ceil(dt / 0.012));
   const h = dt / sub;
   for (let it = 0; it < sub; it++) {
@@ -143,6 +155,16 @@ function stepParticles(dt) {
         if (p.vel.lengthSq() < 0.0001) p.vel.set(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5);
         p.vel.setLength(THREE.MathUtils.lerp(p.vel.length(), speed, 0.08));
         p.pos.addScaledVector(p.vel, h);
+      }
+      // hands (or the mouse) push particles away: a solid springs back, a liquid or gas scatters
+      for (const q of pushers) {
+        _d.subVectors(p.pos, q); const dd = _d.length();
+        if (dd < PUSH_R && dd > 1e-5) {
+          const f = (PUSH_R - dd) / PUSH_R;
+          p.vel.addScaledVector(_d.multiplyScalar(1 / dd), f * (p.state === 0 ? 2.5 : 6) * h * 60 * 0.02);
+          p.pos.addScaledVector(_d, f * 0.004);
+          touched = true;
+        }
       }
       // walls
       for (const ax of ['x', 'z']) {
@@ -172,15 +194,100 @@ function stepParticles(dt) {
   // vibration shown on top of the solid position
   const amp = 0.0015 + 0.004 * heat;
   const t = kit.time;
+  const gasAll = c.g === N;
+  const base = _c1.set(gasAll ? sim.sub.gasColor : sim.sub.color);
   for (let i = 0; i < N; i++) {
     const p = P[i];
     _d.copy(p.pos);
-    if (p.state === 0) _d.add(new THREE.Vector3(Math.sin(t * 31 + p.jit) * amp, Math.sin(t * 37 + p.jit * 2) * amp, Math.sin(t * 29 + p.jit * 3) * amp));
+    if (p.state === 0) _d.add(_v.set(Math.sin(t * 31 + p.jit) * amp, Math.sin(t * 37 + p.jit * 2) * amp, Math.sin(t * 29 + p.jit * 3) * amp));
+    p.show.copy(_d);
     _m.makeTranslation(_d.x, _d.y, _d.z);
     parts.setMatrixAt(i, _m);
+    // every particle of one substance keeps the same colour (different colours would mean different
+    // substances); the whole lot only warms slightly as the temperature rises
+    parts.setColorAt(i, _c2.copy(base).lerp(HOT, heat * 0.22));
   }
   parts.instanceMatrix.needsUpdate = true;
-  pMat.color.set(c.g === N ? sim.sub.gasColor : sim.sub.color);
+  parts.instanceColor.needsUpdate = true;
+  drawBondsAndTrails(base);
+  if (touched && kit.time - lastTouchBuzz > 0.12) { lastTouchBuzz = kit.time; kit.pulse(0.15, 15); }
+}
+const _c1 = new THREE.Color(), _c2 = new THREE.Color(), _v = new THREE.Vector3();
+const HOT = new THREE.Color(0xffe2b8);
+let lastTouchBuzz = 0;
+P.forEach((p) => { p.show = p.pos.clone(); });
+
+// forces of attraction drawn as thin links between close particles; gas particles leave short glowing trails.
+// Thin instanced cylinders rather than GL lines (lines are 1 pixel wide and shimmer in a headset).
+const MAXL = 240, MAXT = N;
+const linkMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 6, 1, true), new THREE.MeshBasicMaterial({ color: 0xcfe3f2, transparent: true, opacity: 0.5, depthWrite: false }), MAXL);
+const trailMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0, 1, 1, 8, 1, true).translate(0, 0.5, 0), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }), MAXT);
+for (const m of [linkMesh, trailMesh]) { m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.userData.noHit = true; m.raycast = () => {}; m.count = 0; chamber.add(m); }
+for (let i = 0; i < MAXT; i++) trailMesh.setColorAt(i, new THREE.Color(0));
+const _q = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0), _dir = new THREE.Vector3(), _sc = new THREE.Vector3(), _mid = new THREE.Vector3();
+function segMatrix(a, b, r, centred) {
+  _dir.subVectors(b, a); const len = _dir.length() || 1e-6;
+  _q.setFromUnitVectors(_up, _dir.multiplyScalar(1 / len));
+  _sc.set(r, len, r);
+  if (centred) _mid.addVectors(a, b).multiplyScalar(0.5); else _mid.copy(a);
+  return _m.compose(_mid, _q, _sc);
+}
+function drawBondsAndTrails(base) {
+  let nl = 0, nt = 0;
+  const solidL = SP * 1.12, liqL = 2 * R * 1.35;
+  for (let i = 0; i < N; i++) {
+    const a = P[i];
+    if (a.state === 2) {
+      // a cone from behind the particle to its centre: longer and brighter when it moves faster
+      const sp = a.vel.length();
+      _v.copy(a.show).addScaledVector(a.vel, -0.07);
+      trailMesh.setMatrixAt(nt, segMatrix(_v, a.show, R * 0.55, false));
+      trailMesh.setColorAt(nt, _c2.copy(base).multiplyScalar(THREE.MathUtils.clamp(sp * 0.35, 0.06, 0.22)));
+      nt++;
+      continue;
+    }
+    for (let j = i + 1; j < N && nl < MAXL; j++) {
+      const b = P[j]; if (b.state === 2) continue;
+      const d = a.show.distanceTo(b.show);
+      const both = a.state === 0 && b.state === 0;
+      if (d < (both ? solidL : liqL)) { linkMesh.setMatrixAt(nl++, segMatrix(a.show, b.show, both ? 0.0028 : 0.0018, true)); }
+    }
+  }
+  linkMesh.count = nl; trailMesh.count = nt;
+  linkMesh.instanceMatrix.needsUpdate = true; trailMesh.instanceMatrix.needsUpdate = true;
+  if (trailMesh.instanceColor) trailMesh.instanceColor.needsUpdate = true;
+}
+
+// what pushes particles: fingertips / controller tips inside the chamber, or the mouse pointer on it
+const PUSH_R = 0.045;
+const pushers = [];
+const pushPool = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const pushGlow = [0, 1, 2].map(() => {
+  const g = new THREE.Sprite(new THREE.SpriteMaterial({ map: kit.glowTexture('170,220,255'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.7 }));
+  g.scale.setScalar(PUSH_R * 2.2); g.visible = false; g.userData.noHit = true; chamber.add(g); return g;
+});
+const _ray = new THREE.Raycaster(), _pl = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), _hit = new THREE.Vector3();
+const mouseOn = { active: false, x: 0, y: 0 };
+kit.renderer.domElement.addEventListener('pointermove', (e) => { mouseOn.x = (e.clientX / innerWidth) * 2 - 1; mouseOn.y = -(e.clientY / innerHeight) * 2 + 1; mouseOn.active = true; });
+kit.renderer.domElement.addEventListener('pointerleave', () => { mouseOn.active = false; });
+function inside(v) { return Math.abs(v.x) < CH.w / 2 + 0.02 && v.y > -0.01 && v.y < CH.h + 0.02 && Math.abs(v.z) < CH.d / 2 + 0.03; }
+function findPushers() {
+  pushers.length = 0;
+  if (!chamber.visible) return;
+  if (kit.renderer.xr.isPresenting) {
+    for (const p of kit.input.pointers) {
+      if (!p.tipOk || pushers.length >= 2) continue;
+      const v = chamber.worldToLocal(pushPool[pushers.length].copy(p.tip));
+      if (inside(v)) pushers.push(v);
+    }
+  } else if (mouseOn.active && !kit.carry.item && !kit.dragging) {
+    // the mouse pushes on the middle plane of the chamber
+    _ray.setFromCamera({ x: mouseOn.x, y: mouseOn.y }, kit.camera);
+    chamber.updateMatrixWorld();
+    const r = _ray.ray.clone().applyMatrix4(new THREE.Matrix4().copy(chamber.matrixWorld).invert());
+    if (r.intersectPlane(_pl, _hit) && inside(_hit)) pushers.push(pushPool[2].copy(_hit));
+  }
+  pushGlow.forEach((g, i) => { g.visible = i < pushers.length; if (g.visible) g.position.copy(pushers[i]); });
 }
 
 // ================================================================= thermometer and graph
@@ -194,7 +301,7 @@ const T_MIN = -20, T_MAX = 140, TH_H = 0.36;
   thermo.add(mesh(new THREE.SphereGeometry(0.017, 16, 12), basic(0xd62c1a), 0, 0.035, 0));
   const scaleP = kit.canvasPlane(0.07, TH_H + 0.04, 1200);
   const { ctx, c } = scaleP;
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#e6e8e6'; ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = '#13293d'; ctx.font = 'bold 26px system-ui'; ctx.textBaseline = 'middle';
   for (let T = T_MIN; T <= T_MAX; T += 10) {
     const y = c.height - (0.02 + (T - T_MIN) / (T_MAX - T_MIN) * TH_H) * 1200;
@@ -224,48 +331,64 @@ function paintThermo() {
 const graph = kit.canvasPlane(0.46, 0.34, 1300);
 const easel = new THREE.Group();
 easel.position.set(0.6, TABLE_Y + 0.25, -0.62); easel.rotation.set(-0.12, -0.55, 0, 'YXZ');
-easel.add(mesh(new THREE.BoxGeometry(0.48, 0.36, 0.015), lam(0x2a3a48), 0, 0, -0.01), graph.mesh);
+easel.add(mesh(new THREE.BoxGeometry(0.49, 0.37, 0.018), mat(0x2a3138, { roughness: 0.45, metalness: 0.2 }), 0, 0, -0.011), graph.mesh);
 easel.add(mesh(new THREE.BoxGeometry(0.02, 0.25, 0.02), lam(0x2a3a48), 0, -0.29, -0.03));
 noHit(easel);
 scene.add(easel);
 function drawGraph(clear = false) {
   if (clear) sim.history = [];
   const { ctx, c } = graph; const W = c.width, H = c.height;
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#1f2b35'; ctx.fillRect(0, 0, W, H);
   const L = 90, Rm = 20, Tp = 60, B = 60;
   const gx = (t) => L + (t / 40) * (W - L - Rm);
   const gy = (T) => H - B - ((T - T_MIN) / (T_MAX - T_MIN)) * (H - B - Tp);
-  ctx.fillStyle = '#13293d'; ctx.font = 'bold 30px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#e8ecee'; ctx.font = 'bold 30px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillText('Temperature (°C) against time', 14, 12);
-  ctx.strokeStyle = '#e3e8ec'; ctx.lineWidth = 2; ctx.font = '22px system-ui'; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
-  for (let T = T_MIN; T <= T_MAX; T += 20) { ctx.beginPath(); ctx.moveTo(L, gy(T)); ctx.lineTo(W - Rm, gy(T)); ctx.stroke(); ctx.fillStyle = '#4a5a68'; ctx.fillText(String(T), L - 10, gy(T)); }
+  // the states as coloured bands behind the graph
   if (!sim.sub.sublimes) {
-    ctx.setLineDash([10, 8]); ctx.strokeStyle = '#b9770e';
+    for (const [a, b, col, name] of [[T_MIN, sim.sub.mp, 'rgba(90,160,220,0.16)', 'solid'], [sim.sub.mp, sim.sub.bp, 'rgba(70,190,160,0.13)', 'liquid'], [sim.sub.bp, T_MAX, 'rgba(230,140,80,0.14)', 'gas']]) {
+      ctx.fillStyle = col; ctx.fillRect(L, gy(b), W - Rm - L, gy(a) - gy(b));
+      ctx.fillStyle = 'rgba(232,236,238,0.55)'; ctx.font = '20px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(name, W - Rm - 8, (gy(a) + gy(b)) / 2);
+    }
+  }
+  ctx.strokeStyle = 'rgba(232,236,238,0.12)'; ctx.lineWidth = 2; ctx.font = '22px system-ui'; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+  for (let T = T_MIN; T <= T_MAX; T += 20) { ctx.beginPath(); ctx.moveTo(L, gy(T)); ctx.lineTo(W - Rm, gy(T)); ctx.stroke(); ctx.fillStyle = '#a9b8c3'; ctx.fillText(String(T), L - 10, gy(T)); }
+  if (!sim.sub.sublimes) {
+    ctx.setLineDash([10, 8]); ctx.strokeStyle = '#e0a83a';
     for (const [T, n] of [[sim.sub.mp, 'melting point'], [sim.sub.bp, 'boiling point']]) {
       ctx.beginPath(); ctx.moveTo(L, gy(T)); ctx.lineTo(W - Rm, gy(T)); ctx.stroke();
-      ctx.fillStyle = '#b9770e'; ctx.textAlign = 'left'; ctx.fillText(`${n} ${T} °C`, L + 8, gy(T) - 16);
+      ctx.fillStyle = '#e0a83a'; ctx.textAlign = 'left'; ctx.font = '22px system-ui'; ctx.fillText(`${n} ${T} °C`, L + 8, gy(T) - 16);
     }
     ctx.setLineDash([]);
   }
-  ctx.strokeStyle = '#13293d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(L, Tp); ctx.lineTo(L, H - B); ctx.lineTo(W - Rm, H - B); ctx.stroke();
-  ctx.fillStyle = '#4a5a68'; ctx.textAlign = 'center'; ctx.fillText('time (last 40 s)', (L + W) / 2, H - 25);
+  ctx.strokeStyle = '#c9d3da'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(L, Tp); ctx.lineTo(L, H - B); ctx.lineTo(W - Rm, H - B); ctx.stroke();
+  ctx.fillStyle = '#a9b8c3'; ctx.textAlign = 'center'; ctx.fillText('time (last 40 s)', (L + W) / 2, H - 25);
   const hst = sim.history;
   if (hst.length > 1) {
     const t0 = Math.max(0, hst[hst.length - 1][0] - 40);
-    ctx.strokeStyle = '#d62c1a'; ctx.lineWidth = 5; ctx.beginPath();
-    let first = true;
-    for (const [t, T] of hst) { if (t < t0) continue; const x = gx(t - t0), y = gy(T); if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y); }
+    ctx.strokeStyle = '#ff6b4a'; ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.beginPath();
+    let first = true, lx = 0, ly = 0;
+    for (const [t, T] of hst) { if (t < t0) continue; const x = gx(t - t0), y = gy(T); if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y); lx = x; ly = y; }
     ctx.stroke();
+    // the live point glows
+    const gl = ctx.createRadialGradient(lx, ly, 0, lx, ly, 26); gl.addColorStop(0, 'rgba(255,180,140,0.9)'); gl.addColorStop(1, 'rgba(255,120,80,0)');
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(lx, ly, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff1e8'; ctx.beginPath(); ctx.arc(lx, ly, 7, 0, Math.PI * 2); ctx.fill();
   }
   graph.update();
 }
 
 // ================================================================= heater
 function paintHeater() {
-  const h = sim.heater;
-  plateMat.emissive.set(h > 0 ? 0xc0392b : h < 0 ? 0x2e86c1 : 0x000000);
-  plateMat.emissiveIntensity = h ? 0.9 : 0;
-  coilMat.color.set(h > 0 ? 0xff6b3d : h < 0 ? 0x9fd8ff : 0x333333);
+  const h = sim.heater, a = Math.abs(h);
+  plateMat.emissive.set(h > 0 ? 0xd2451e : h < 0 ? 0x2e86c1 : 0x000000);
+  plateMat.emissiveIntensity = a * 0.9;
+  coilMat.color.set(0x333333).lerp(new THREE.Color(h > 0 ? 0xff7a3d : 0x9fd8ff), a);
+  if (knob) {
+    knob.position.x = h * SL_HALF;
+    knobMat.color.set(h > 0.05 ? 0xe0592a : h < -0.05 ? 0x3c8dc9 : 0x8d99a3);
+    slReadout.userData.draw(h > 0.05 ? `HEAT ${Math.round(h * 100)}%` : h < -0.05 ? `COOL ${Math.round(-h * 100)}%` : 'OFF', h > 0.05 ? '#a8432a' : h < -0.05 ? '#2b6a99' : '#4a5864');
+  }
   if (heatBtns.length) {
     heatBtns[0].userData.draw('COOL', h < 0 ? '#1b6fa8' : '#5d7e9a');
     heatBtns[1].userData.draw('OFF', h === 0 ? '#34495e' : '#7b8a97');
@@ -283,22 +406,79 @@ function stepHeat(dt) {
   }
 }
 
+// ================================================================= the heater slider on the hotplate's front
+// Pinch the knob and slide it (or drag it with the mouse): left cools, the middle is off, right heats.
+const SL_HALF = 0.26;
+const slider = new THREE.Group();
+const slTrackTex = (() => {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 48; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 512, 0); g.addColorStop(0, '#3c8dc9'); g.addColorStop(0.45, '#56636d'); g.addColorStop(0.55, '#56636d'); g.addColorStop(1, '#e0592a');
+  x.fillStyle = g; kit.roundRect(x, 4, 8, 504, 32, 16); x.fill();
+  x.fillStyle = 'rgba(255,255,255,0.75)'; for (const t of [0, 0.25, 0.5, 0.75, 1]) x.fillRect(8 + t * 494, 4, 3, 40);
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx;
+})();
+slider.add(mesh(new THREE.PlaneGeometry(SL_HALF * 2 + 0.02, 0.024), new THREE.MeshBasicMaterial({ map: slTrackTex }), 0, 0, 0.0005));
+const knobMat = mat(0x8d99a3, { roughness: 0.35, metalness: 0.2 });
+const knob = new THREE.Group();
+knob.add(mesh(new THREE.CylinderGeometry(0.022, 0.025, 0.036, 24).rotateX(Math.PI / 2), knobMat, 0, 0, 0.019));
+knob.add(mesh(new THREE.BoxGeometry(0.005, 0.03, 0.002), basic(0xf3f2ee), 0, 0, 0.038));
+slider.add(knob);
+const slReadout = label('OFF', { w: 0.12, h: 0.032, bg: '#4a5864', fg: '#f3f2ee', font: 'bold 30px system-ui, sans-serif' });
+slReadout.position.set(SL_HALF + 0.1, 0, 0.002); slider.add(slReadout);
+noHit(slider);
+knob.traverse((o) => { o.userData.noHit = false; });
+kit.draggable(knob, {
+  name: 'Heater: slide left to cool, right to heat',
+  enabled: () => mode.kind === 'heat' && chamber.visible,
+  // the drag point is found on the slider's own plane, then only its sideways position is used
+  plane: () => { slider.updateMatrixWorld(); const n = new THREE.Vector3(0, 0, 1).transformDirection(slider.matrixWorld); return new THREE.Plane().setFromNormalAndCoplanarPoint(n, slider.getWorldPosition(new THREE.Vector3())); },
+  onMove: (pt) => {
+    const lx = slider.worldToLocal(pt.clone()).x;
+    let v = THREE.MathUtils.clamp(lx / SL_HALF, -1, 1);
+    if (Math.abs(v) < 0.1) v = 0;                 // a gentle detent at OFF
+    const before = sim.heater;
+    setHeater(Math.round(v * 20) / 20, true);
+    if (Math.sign(before) !== Math.sign(sim.heater) || Math.abs(before - sim.heater) > 0.24) sfx.tick();
+  },
+});
+// heat shimmer (warm glows rising) and frost (cold glows sinking) around the hotplate
+const shimmer = [];
+for (let i = 0; i < 14; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: kit.glowTexture('255,160,90'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+  sp.userData.noHit = true; sp.userData.t = Math.random(); sp.userData.x = (Math.random() - 0.5) * CH.w; sp.userData.z = (Math.random() - 0.5) * CH.d;
+  sp.scale.setScalar(0.05); chamber.add(sp); shimmer.push(sp);
+}
+function stepShimmer(dt) {
+  const h = sim.heater, a = Math.abs(h);
+  for (const sp of shimmer) {
+    sp.userData.t += dt * (0.5 + a * 0.6);
+    if (sp.userData.t > 1) { sp.userData.t -= 1; sp.userData.x = (Math.random() - 0.5) * CH.w; sp.userData.z = (Math.random() - 0.5) * CH.d; }
+    const t = sp.userData.t;
+    sp.material.color.set(h >= 0 ? 0xffa15a : 0x9fd8ff);
+    sp.position.set(sp.userData.x, h >= 0 ? 0.01 + t * 0.09 : 0.06 - t * 0.07, sp.userData.z + CH.d / 2 + 0.02);
+    sp.material.opacity = a * Math.sin(t * Math.PI) * 0.45;
+    sp.visible = a > 0.02;
+  }
+}
+
 // ================================================================= controls in front of the learner
 const row = new THREE.Group();
 row.position.set(0.05, TABLE_Y + 0.06, -0.36); row.rotation.x = -0.9;
 scene.add(row);
-row.add(noHit(mesh(new THREE.BoxGeometry(0.9, 0.1, 0.02), lam(0x2a3a48), 0, 0, -0.02)));
+row.add(noHit(mesh(new THREE.BoxGeometry(0.9, 0.17, 0.02), mat(0x2b3138, { roughness: 0.5 }), 0, 0, -0.02)));
+slider.position.set(-0.05, 0.045, 0); row.add(slider);
 const heatBtns = ['COOL', 'OFF', 'HEAT'].map((t, i) => {
-  const b = button(t, 0.16, 0.075, { font: 'bold 34px system-ui, sans-serif' });
-  b.position.set((i - 1) * 0.2, 0, 0);
+  const b = button(t, 0.12, 0.05, { font: 'bold 30px system-ui, sans-serif' });
+  b.position.set(-0.05 + (i - 1) * SL_HALF, -0.035, 0);
   row.add(b);
   kit.interactive(b, { name: ['Cool the chamber', 'Switch the heater off', 'Heat the chamber'][i], onSelect: () => setHeater(i - 1), enabled: () => b.visible });
   return b;
 });
-function setHeater(h) {
+function setHeater(h, quiet = false) {
   if (mode.kind !== 'heat') return;
-  sim.heater = h; edgeWarned = false; paintHeater();
-  if (h) sfx.tone(h > 0 ? 300 : 900, 0.3, 'sine', 0.06, h > 0 ? 600 : 450);
+  if (h !== sim.heater) edgeWarned = false;
+  sim.heater = h; paintHeater();
+  if (h && !quiet) sfx.tone(h > 0 ? 300 : 900, 0.3, 'sine', 0.06, h > 0 ? 600 : 450);
 }
 // answer buttons (A B C or names of changes) share the same row
 const ansBtns = [];
@@ -306,6 +486,7 @@ const ansPools = {};
 function showAnswers(labels, onPick, width = 0.16, font = 'bold 30px system-ui, sans-serif') {
   ansBtns.forEach((b) => { b.visible = false; });
   heatBtns.forEach((b) => { b.visible = false; });
+  slider.visible = false;
   const step = width + 0.016;
   const pool = (ansPools[width + font] ||= []);
   labels.forEach((t, i) => {
@@ -323,8 +504,8 @@ function showAnswers(labels, onPick, width = 0.16, font = 'bold 30px system-ui, 
   });
   // scale stretches the canvas text: redraw with a matching font width is not needed for short labels
 }
-function showHeaterButtons() { ansBtns.forEach((b) => { b.visible = false; }); heatBtns.forEach((b) => { b.visible = true; }); paintHeater(); }
-function hideRow() { ansBtns.forEach((b) => { b.visible = false; }); heatBtns.forEach((b) => { b.visible = false; }); }
+function showHeaterButtons() { ansBtns.forEach((b) => { b.visible = false; }); heatBtns.forEach((b) => { b.visible = true; }); slider.visible = true; paintHeater(); }
+function hideRow() { ansBtns.forEach((b) => { b.visible = false; }); heatBtns.forEach((b) => { b.visible = false; }); slider.visible = false; }
 
 // ================================================================= level 1: heat and cool
 const mode = { kind: 'idle' };
@@ -498,37 +679,42 @@ const MOL = {
   CO2: [['C', 0, 0, 0], ['O', -0.014, 0, 0], ['O', 0.014, 0, 0]],
 };
 const JAR = 0.1;
+const jarGlass = new THREE.MeshStandardMaterial({ color: 0xd4ebfb, transparent: true, opacity: 0.2, roughness: 0.04, depthWrite: false, envMapIntensity: 1.6, side: THREE.DoubleSide });
+const corkMat = mat(0xa9774a, { roughness: 0.9 });
 function jarMesh(letter) {
   const g = new THREE.Group();
-  const glass = new THREE.MeshStandardMaterial({ color: 0xe8f4ff, transparent: true, opacity: 0.22, roughness: 0.1, depthWrite: false });
-  g.add(mesh(new THREE.BoxGeometry(JAR, JAR, JAR), glass));
-  const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(JAR, JAR, JAR)), new THREE.LineBasicMaterial({ color: 0x5d7e9a }));
-  e.userData.noHit = true;
-  g.add(e);
+  // a round glass jar with a cork stopper
+  const body = mesh(new THREE.CylinderGeometry(JAR * 0.52, JAR * 0.52, JAR, 28, 1, true), jarGlass); body.renderOrder = 3;
+  const bottom = mesh(new THREE.CircleGeometry(JAR * 0.52, 28).rotateX(-Math.PI / 2), jarGlass, 0, -JAR / 2, 0);
+  const rim = mesh(new THREE.TorusGeometry(JAR * 0.52, 0.003, 6, 28).rotateX(Math.PI / 2), mat(0xcfe0ea, { roughness: 0.1, metalness: 0.2 }), 0, JAR / 2, 0);
+  const cork = mesh(new THREE.CylinderGeometry(JAR * 0.42, JAR * 0.38, 0.02, 20), corkMat, 0, JAR / 2 + 0.006, 0);
+  g.add(body, bottom, rim, cork);
   const tag = label(letter, { w: 0.04, h: 0.04, bg: '#13293d', fg: '#ffffff', font: 'bold 44px system-ui, sans-serif', res: 1500, radius: 30 });
-  tag.position.set(0, JAR / 2 + 0.025, 0); tag.userData.noHit = true;
+  tag.position.set(0, JAR / 2 + 0.04, 0); tag.userData.noHit = true;
   g.add(tag); g.userData.tag = tag;
   return g;
 }
 function addAtoms(g, list) {
   const byEl = {};
-  for (const [el, x, y, z] of list) (byEl[el] ||= []).push([x, y, z]);
+  for (const [el, x, y, z, mol] of list) (byEl[el] ||= []).push([x, y, z, mol]);
   for (const el in byEl) {
     const im = new THREE.InstancedMesh(atomGeo, atomMat(el), byEl[el].length);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.userData.base = byEl[el].map(([x, y, z, mol]) => ({ x, y, z, mol: mol ?? -1, r: ATOM_R[el] }));
     byEl[el].forEach(([x, y, z], i) => { const r = ATOM_R[el]; im.setMatrixAt(i, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(r, r, r))); });
-    g.add(im);
+    g.add(im); (g.userData.atomMeshes ||= []).push(im);
   }
 }
 // scatter molecules in the jar (random positions and turns, no overlaps)
 function scatter(mols) {
   const out = []; const placed = [];
-  for (const m of mols) {
+  for (const [mi, m] of mols.entries()) {
     let p, tries = 0;
     do { p = new THREE.Vector3((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06); tries++; }
     while (placed.some((q) => q.distanceTo(p) < 0.027) && tries < 80);
     placed.push(p);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
-    for (const [el, x, y, z] of MOL[m]) { const v = new THREE.Vector3(x, y, z).applyQuaternion(q).add(p); out.push([el, v.x, v.y, v.z]); }
+    for (const [el, x, y, z] of MOL[m]) { const v = new THREE.Vector3(x, y, z).applyQuaternion(q).add(p); out.push([el, v.x, v.y, v.z, mi]); }
   }
   return out;
 }
@@ -552,7 +738,7 @@ const trays = KINDS.map((k, i) => {
   const g = new THREE.Group();
   g.position.set(-0.24 + i * 0.27, TABLE_Y, -0.43);
   const base = mesh(new THREE.BoxGeometry(0.25, 0.02, 0.17), lam([0x2e86c1, 0xc0392b, 0x27ae60][i]), 0, 0.01, 0);
-  const rimM = lam(0xffffff);
+  const rimM = lam(0xd8d6cf);
   for (const [w, d, x, z] of [[0.25, 0.01, 0, 0.08], [0.25, 0.01, 0, -0.08], [0.01, 0.17, 0.12, 0], [0.01, 0.17, -0.12, 0]]) g.add(mesh(new THREE.BoxGeometry(w, 0.03, d), rimM, x, 0.025, z));
   g.add(base);
   const t = label(k.toUpperCase(), { w: 0.23, h: 0.045, bg: ['#2e86c1', '#c0392b', '#27ae60'][i], fg: '#ffffff', font: 'bold 34px system-ui, sans-serif' });
@@ -664,10 +850,24 @@ setSubstance('water', 0);
 flow.showIntro();
 kit.onKind(() => { if (mode.kind === 'sort') l3Draw(); });
 
+const _jm = new THREE.Matrix4(), _jp = new THREE.Vector3(), _jq = new THREE.Quaternion(), _js = new THREE.Vector3();
+function animateJars(t) {
+  for (const j of jars) for (const im of j.userData.atomMeshes || []) {
+    im.userData.base.forEach((b, i) => {
+      if (b.mol >= 0) { const ph = b.mol * 1.7 + j.userData.letter.charCodeAt(0); _jp.set(b.x + Math.sin(t * 1.3 + ph) * 0.005, b.y + Math.sin(t * 1.1 + ph * 2) * 0.005, b.z + Math.cos(t * 1.2 + ph) * 0.005); }
+      else { const ph = i * 2.3; _jp.set(b.x + Math.sin(t * 23 + ph) * 0.0007, b.y + Math.sin(t * 29 + ph) * 0.0007, b.z + Math.sin(t * 19 + ph) * 0.0007); }
+      im.setMatrixAt(i, _jm.compose(_jp, _jq, _js.setScalar(b.r)));
+    });
+    im.instanceMatrix.needsUpdate = true;
+  }
+}
+
 kit.tick((dt) => {
+  if (sorting.visible) animateJars(kit.time);
   if (chamber.visible) {
     stepHeat(dt);
     stepParticles(dt);
+    stepShimmer(dt);
     paintThermo();
     const c = counts(sim.Q); const sn = stateName(c);
     if (sn !== stateLabel.userData.last) { stateLabel.userData.last = sn; stateLabel.userData.draw(sn, '#1d4e6e'); }
@@ -683,4 +883,4 @@ kit.tick((dt) => {
 kit.start();
 
 // Test hook (used by the automated browser test; harmless for players).
-window.game = { kit, flow, sim, counts, tempOf, L1, L2, L3, jars, trays, heatBtns, ansBtns, mode, CHANGES, CH_KEYS, board, setSubstance, speed: 1 };
+window.game = { kit, flow, sim, counts, tempOf, L1, L2, L3, jars, trays, heatBtns, ansBtns, mode, CHANGES, CH_KEYS, board, setSubstance, slider, knob, SL_HALF, speed: 1 };

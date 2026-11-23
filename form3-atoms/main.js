@@ -27,7 +27,7 @@ function arrangement(n) { const out = []; let left = n; for (const c of CAP) { i
 {
   const p = kit.canvasPlane(0.52, 0.32, 1400);
   const { ctx, c } = p; const W = c.width, H = c.height;
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#e8e6e0'; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#13293d'; ctx.font = 'bold 30px system-ui'; ctx.textBaseline = 'top';
   ctx.fillText('Periodic table: elements 1 to 20', 14, 10);
   const pos = {};   // Z -> [col, row]
@@ -60,7 +60,8 @@ const SHELL_R = [0.05, 0.082, 0.114];
 const NUC_R = 0.0072;
 const pGeo = new THREE.SphereGeometry(NUC_R, 14, 10), eGeo = new THREE.SphereGeometry(0.0085, 14, 10);
 const protonMat = mat(0xd63a2f, { roughness: 0.35 }), neutronMat = mat(0x9aa3ab, { roughness: 0.45 });
-const eMats = { own: mat(0x2e86c1, { roughness: 0.3, emissive: 0x0b2a44 }), given: mat(0xf1c40f, { roughness: 0.3, emissive: 0x4a3a00 }) };
+const eMats = { own: mat(0x3b9ae1, { roughness: 0.25, emissive: 0x1d5a8c }), given: mat(0xf1c40f, { roughness: 0.25, emissive: 0x8a6a00 }) };
+const nucGlowTex = kit.glowTexture('255,150,110'), ionTex = { pos: kit.glowTexture('255,120,90'), neg: kit.glowTexture('90,160,255') };
 // packed nucleon positions: a jittered lattice sorted by distance from the centre
 const NUC_PTS = (() => {
   const pts = []; const s = NUC_R * 1.75;
@@ -71,15 +72,17 @@ const NUC_PTS = (() => {
   }
   return pts.sort((a, b) => a.length() - b.length()).slice(0, 60);
 })();
-const ringMat = new THREE.MeshBasicMaterial({ color: 0x5d7e9a });
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x7fa6c4 });
 const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
 function atomView() {
   const g = new THREE.Group();
   const prot = new THREE.InstancedMesh(pGeo, protonMat, 60), neut = new THREE.InstancedMesh(pGeo, neutronMat, 60);
   prot.count = neut.count = 0;
-  g.add(prot, neut);
+  const nuc = new THREE.Group(); nuc.add(prot, neut); g.add(nuc);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: nucGlowTex, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+  glow.scale.setScalar(0.001); noHit(glow); g.add(glow);
   const shells = SHELL_R.map((r, i) => {
-    const ring = mesh(new THREE.TorusGeometry(r, 0.0016, 6, 96), ringMat.clone());
+    const ring = mesh(new THREE.TorusGeometry(r, 0.0021, 6, 96), ringMat.clone());
     ring.material.transparent = true;
     const hit = mesh(new THREE.TorusGeometry(r, 0.011, 6, 48), hitMat);
     ring.add(hit);
@@ -92,7 +95,8 @@ function atomView() {
   noHit(sym);
   const charge = label('', { w: 0.08, h: 0.05, bg: null, fg: '#b03a2e', font: 'bold 52px system-ui, sans-serif' });
   charge.position.set(SHELL_R[2] + 0.02, -SHELL_R[2] - 0.01, 0); g.add(charge); noHit(charge);
-  const view = { group: g, shells, electrons: [[], [], []], p: 0, n: 0, sym, charge };
+  const view = { group: g, shells, electrons: [[], [], []], p: 0, n: 0, sym, charge, nuc, glow, orbit: [0, 0, 0], spin: true };
+  VIEWS.add(view);
   view.setNucleus = (p, n) => {
     view.p = p; view.n = n;
     const total = Math.min(60, p + n);
@@ -106,15 +110,18 @@ function atomView() {
     }
     prot.count = pi; neut.count = ni;
     prot.instanceMatrix.needsUpdate = neut.instanceMatrix.needsUpdate = true;
+    prot.computeBoundingSphere(); neut.computeBoundingSphere();
+    glow.scale.setScalar(total ? 0.05 + Math.cbrt(total) * 0.018 : 0.001);
   };
   // place electrons of one shell evenly round its ring
   view.layout = (si, animate = true) => {
     const list = view.electrons[si]; const r = SHELL_R[si];
     list.forEach((e, i) => {
-      const a = Math.PI / 2 - (i / Math.max(1, list.length)) * Math.PI * 2 - (si * 0.4);
-      const to = new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0);
+      const u = e.userData;
+      u.slotA = Math.PI / 2 - (i / Math.max(1, list.length)) * Math.PI * 2 - (si * 0.4); u.tr = r;
       if (e.parent !== g) g.attach(e);
-      if (animate) { const from = e.position.clone(); tween(0.25, (k) => e.position.lerpVectors(from, to, k)); } else e.position.copy(to);
+      if (u.owner !== g || !animate) { u.owner = g; u.ang = Math.atan2(e.position.y, e.position.x); u.r = Math.hypot(e.position.x, e.position.y); }
+      if (!animate) { u.ang = u.slotA + view.orbit[si]; u.r = r; e.position.set(Math.cos(u.ang) * r, Math.sin(u.ang) * r, 0); }
     });
   };
   view.addElectron = (si, kind = 'own', animate = true) => {
@@ -142,6 +149,30 @@ function atomView() {
   return view;
 }
 
+// Electrons glide to their places and slowly orbit; the nucleus turns gently. Electrons that can be
+// picked up hold still (and pulse) so they are easy to grab.
+const VIEWS = new Set();
+const ORBIT_W = [0.55, 0.38, 0.28];
+kit.tick((dt, t) => {
+  for (const v of VIEWS) {
+    if (!v.group.parent || !v.group.visible) continue;
+    v.nuc.rotation.y += dt * 0.35; v.nuc.rotation.x = Math.sin(t * 0.5) * 0.3;
+    const k = Math.min(1, dt * 9);
+    for (let si = 0; si < 3; si++) {
+      if (v.spin) v.orbit[si] += dt * ORBIT_W[si];
+      for (const e of v.electrons[si]) {
+        if (e.parent !== v.group) continue;
+        const u = e.userData; if (u.ang == null) continue;
+        let d = u.slotA + v.orbit[si] - u.ang; d = Math.atan2(Math.sin(d), Math.cos(d));
+        u.ang += d * k; u.r += (u.tr - u.r) * k;
+        e.position.set(Math.cos(u.ang) * u.r, Math.sin(u.ang) * u.r, e.position.z * (1 - k));
+        const pickable = u.carry && !u.moved && mode.kind === 'bond' && L2.phase === 'move';
+        e.scale.setScalar(pickable ? 1 + 0.18 * (0.5 + 0.5 * Math.sin(t * 5 + u.slotA)) : 1);
+      }
+    }
+  }
+});
+
 // the main atom (levels 1 and 3)
 const main = atomView();
 main.group.position.set(0.0, 1.17, -0.6);
@@ -152,15 +183,16 @@ scene.add(main.group);
 const info = kit.canvasPlane(0.3, 0.34, 1300);
 const infoG = new THREE.Group();
 infoG.position.set(-0.37, 1.25, -0.68); infoG.rotation.y = 0.4;
-infoG.add(mesh(new THREE.BoxGeometry(0.32, 0.36, 0.015), lam(0x2a3a48), 0, 0, -0.01), info.mesh);
+infoG.add(mesh(new THREE.BoxGeometry(0.325, 0.365, 0.015), mat(0x3a4550, { metalness: 0.3, roughness: 0.4 }), 0, 0, -0.01), info.mesh);
+infoG.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.27, 10), mat(0x8d969e, { metalness: 0.7, roughness: 0.35 }), 0, -0.31, -0.02));
 noHit(infoG); scene.add(infoG);
 function drawInfo({ target = null, title = 'Your atom', showCounts = true } = {}) {
   const { ctx, c } = info; const W = c.width, H = c.height;
-  ctx.fillStyle = '#fbfaf5'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#1f2b35'; ctx.fillRect(0, 0, W, H);
   let y = 20;
   if (target) {
-    ctx.fillStyle = '#1d4e6e'; ctx.fillRect(0, 0, W, 210);
-    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 30px system-ui'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#2b5d80'; ctx.fillRect(0, 0, W, 210);
+    ctx.fillStyle = '#f3f2ee'; ctx.font = 'bold 30px system-ui'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
     ctx.fillText(`BUILD: ${target.name.toUpperCase()}`, 18, 14);
     // nuclide notation: mass number top-left, atomic number bottom-left
     const cx = W / 2 + 20;
@@ -172,21 +204,87 @@ function drawInfo({ target = null, title = 'Your atom', showCounts = true } = {}
     ctx.fillText(String(target.Z), cx - sw / 2 - 8, 182);
     y = 240;
   }
-  ctx.fillStyle = '#13293d'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#e4e8ea'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
   ctx.font = 'bold 32px system-ui'; ctx.fillText(title, 18, y); y += 50;
   if (showCounts) {
-    const rows = [['Protons', main.p, '#d63a2f'], ['Neutrons', main.n, '#7b8a97'], ['Electrons', main.eCount(), '#2e86c1']];
+    const rows = [['Protons', main.p, '#e0574b'], ['Neutrons', main.n, '#9aa3ab'], ['Electrons', main.eCount(), '#3b9ae1']];
     for (const [n, v, col] of rows) {
       ctx.fillStyle = col; ctx.beginPath(); ctx.arc(32, y + 18, 13, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#13293d'; ctx.font = '34px system-ui'; ctx.fillText(n, 58, y); ctx.font = 'bold 38px system-ui'; ctx.textAlign = 'right'; ctx.fillText(String(v), W - 24, y); ctx.textAlign = 'left';
+      ctx.fillStyle = '#e4e8ea'; ctx.font = '34px system-ui'; ctx.fillText(n, 58, y); ctx.font = 'bold 38px system-ui'; ctx.textAlign = 'right'; ctx.fillText(String(v), W - 24, y); ctx.textAlign = 'left';
       y += 50;
     }
-    ctx.font = '30px system-ui'; ctx.fillStyle = '#4a5a68';
+    ctx.font = '30px system-ui'; ctx.fillStyle = '#b4c1ca';
     const cfg = main.config().filter((x, i) => x || main.config().slice(i + 1).some(Boolean));
     ctx.fillText(`Arrangement: ${cfg.length ? cfg.join(', ') : '—'}`, 18, y + 4);
   }
   info.update();
 }
+
+// ================================================================= the forge: a projector under the atom
+const forge = new THREE.Group();
+forge.position.set(0, TABLE_Y, -0.6);
+scene.add(forge);
+{
+  const steel = mat(0xb9c2c9, { metalness: 0.8, roughness: 0.3 });
+  forge.add(mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.04, 48), mat(0x2b3138, { roughness: 0.4, metalness: 0.3 }), 0, 0.02, 0));
+  forge.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.006, 48), steel, 0, 0.043, 0));
+  forge.add(mesh(new THREE.TorusGeometry(0.115, 0.005, 8, 64).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5fb8ff }), 0, 0.041, 0));
+  // a faint beam of light up to the atom
+  const beam = mesh(new THREE.CylinderGeometry(0.035, 0.09, 0.26, 32, 1, true), new THREE.MeshBasicMaterial({ color: 0x2a6ea8, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }), 0, 0.175, 0);
+  forge.add(beam);
+  const sh = kit.contactShadow(0.42, 0.42, 0.5); sh.position.y = 0.002; forge.add(sh);
+  noHit(forge);
+}
+
+// ================================================================= particle bins: pick up a proton, neutron or electron
+// Hold a particle and press on the nucleus (protons, neutrons) or on a shell ring (electrons). The particle
+// stays in your hand, so you can keep adding; put it back by pressing anywhere else.
+const TOKEN = { p: { name: 'proton', mat: protonMat, color: '#e0574b', tag: 'PROTONS  +' }, n: { name: 'neutron', mat: neutronMat, color: '#9aa3ab', tag: 'NEUTRONS  0' }, e: { name: 'electron', mat: eMats.own, color: '#3b9ae1', tag: 'ELECTRONS  −' } };
+const BIN_POS = { p: [-0.34, -0.53], n: [-0.2, -0.56], e: [0.22, -0.55] };
+const tokens = {};
+for (const k of ['p', 'n', 'e']) {
+  const bin = new THREE.Group();
+  bin.position.set(BIN_POS[k][0], TABLE_Y, BIN_POS[k][1]);
+  scene.add(bin);
+  bin.add(mesh(new THREE.LatheGeometry([[0, 0.003], [0.05, 0.003], [0.056, 0.008], [0.058, 0.026], [0.054, 0.027], [0.05, 0.01], [0, 0.01]].map(([x, y]) => new THREE.Vector2(x, y)), 40), mat(0x3a4550, { roughness: 0.35, metalness: 0.4 })));
+  const r = k === 'e' ? 0.0085 : NUC_R;
+  const pile = new THREE.InstancedMesh(k === 'e' ? eGeo : pGeo, TOKEN[k].mat, 14);
+  for (let i = 0; i < 14; i++) { const a = i * 2.4, d = 0.012 + (i % 5) * 0.007; pile.setMatrixAt(i, new THREE.Matrix4().makeScale(1.8, 1.8, 1.8).setPosition(Math.cos(a) * d, 0.018 + (i > 8 ? r * 2 : 0), Math.sin(a) * d)); }
+  bin.add(pile);
+  const tag = label(TOKEN[k].tag, { w: 0.12, h: 0.026, bg: '#2b3138', fg: TOKEN[k].color, font: 'bold 30px system-ui, sans-serif' });
+  tag.position.set(0, 0.008, 0.075); tag.rotation.x = -1.1; bin.add(tag);
+  const sh = kit.contactShadow(0.16, 0.16, 0.45); sh.position.y = 0.001; bin.add(sh);
+  noHit(bin);
+  // the particle you pick up (a fresh one appears each time it is used)
+  const tok = mesh(new THREE.SphereGeometry(0.017, 20, 14), TOKEN[k].mat, 0, 0.05, 0);
+  tok.userData.token = k;
+  bin.add(tok);
+  kit.carryable(tok, { name: `Pick up a ${TOKEN[k].name}`, canPick: () => mode.kind === 'build', holdOffset: new THREE.Vector3(0, 0.025, -0.01), holdScale: 1 });
+  tokens[k] = tok;
+}
+const heldToken = () => kit.carry.item && kit.carry.item.userData.token;
+kit.tick((dt, t) => { for (const k in tokens) if (kit.carry.item !== tokens[k]) tokens[k].position.y = 0.05 + Math.sin(t * 2 + k.charCodeAt(0)) * 0.006; });
+// a copy of the particle flies from the hand into the atom
+function flyIn(k, toLocal) {
+  const tok = tokens[k];
+  const ghost = mesh(tok.geometry, tok.material);
+  tok.getWorldPosition(ghost.position); ghost.scale.copy(tok.getWorldScale(new THREE.Vector3()));
+  scene.add(ghost);
+  const from = ghost.position.clone(), to = main.group.localToWorld(toLocal.clone());
+  const s0 = ghost.scale.x, s1 = (k === 'e' ? 0.0085 : NUC_R) / 0.017 * main.group.scale.x;
+  return tween(0.28, (q) => { ghost.position.lerpVectors(from, to, q); ghost.position.y += Math.sin(q * Math.PI) * 0.04; ghost.scale.setScalar(s0 + (s1 - s0) * q); }).then(() => { scene.remove(ghost); });
+}
+// the nucleus accepts protons and neutrons while one is held
+const nucHit = mesh(new THREE.SphereGeometry(0.03, 16, 12), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+main.group.add(nucHit);
+kit.interactive(nucHit, {
+  name: 'Nucleus: add the particle you hold',
+  enabled: () => mode.kind === 'build' && (heldToken() === 'p' || heldToken() === 'n'),
+  onSelect: () => {
+    const k = heldToken(); if (k !== 'p' && k !== 'n') return;
+    flyIn(k, new THREE.Vector3()).then(() => { changeNucleus(k === 'p' ? 1 : 0, k === 'n' ? 1 : 0); kit.sparkle(main.group.getWorldPosition(new THREE.Vector3()), 8, k === 'p' ? 0xff8a6a : 0xc8d0d6); });
+  },
+});
 
 // ================================================================= the button row
 const row = new THREE.Group();
@@ -225,7 +323,12 @@ main.shells.forEach((ring, si) => {
     enabled: () => mode.kind === 'build' && ring.visible,
     distance: (wp) => { main.group.worldToLocal(lp.copy(wp)); return (Math.abs(Math.hypot(lp.x, lp.y) - r) + Math.abs(lp.z)) * 1.25 - 0.006; },
     highlight: false,
-    onSelect: () => addShellElectron(si),
+    onSelect: () => {
+      const k = heldToken();
+      if (k === 'p' || k === 'n') { say(`A ${TOKEN[k].name} belongs in the nucleus, in the middle of the atom. Shells hold electrons.`, 'bad'); return; }
+      if (k === 'e' && main.electrons[si].length < CAP[si]) { const a = 3.5; flyIn('e', new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0)); }
+      addShellElectron(si);
+    },
   });
 });
 function addShellElectron(si) {
@@ -253,7 +356,7 @@ function l1Draw(extra = '') {
   board.draw({
     heading: 'Level 1: Build the atom', level: `Atom ${L1.i + 1} of ${L1.targets.length}`,
     body: [`Build an atom of **${t.name.toLowerCase()}-${t.A}**. The card on your left shows its symbol with the **mass number** on top and the **atomic number** below.`,
-      `Use the buttons to add **protons** (P) and **neutrons** (N) to the nucleus. To add an electron, ${w.choose} a **shell** ring. Then press **Check**.`, extra],
+      `Take particles from the bins on the table: put **protons** and **neutrons** into the nucleus, and **electrons** onto a shell ring (${w.choose} the ring). The P and N buttons are quick shortcuts. Then press **Check**.`, extra],
     items: [
       { text: 'Protons = atomic number', state: 'todo' },
       { text: 'Neutrons = mass number − atomic number', state: 'todo' },
@@ -271,7 +374,7 @@ function l1Load() {
   l1Draw();
 }
 function l1Start() {
-  mode.kind = 'build';
+  mode.kind = 'build'; binsShow(true);
   showMain(true); showPair(false);
   L1.i = 0;
   setRow([
@@ -326,7 +429,7 @@ const METALS = [3, 4, 11, 12, 13, 19, 20];
 const L2 = { i: 0, views: [], phase: 'move', tries: 0, moves: 0, need: 0 };
 function clearPair() {
   if (kit.carry.item && L2.views.some((v) => v.electrons.flat().includes(kit.carry.item))) kit.returnHome(kit.carry.item);
-  for (const v of L2.views) { v.electrons.flat().forEach((e) => kit.uninteractive(e)); v.shells.forEach((s) => kit.uninteractive(s)); pairG.remove(v.group); }
+  for (const v of L2.views) { v.electrons.flat().forEach((e) => kit.uninteractive(e)); v.shells.forEach((s) => kit.uninteractive(s)); pairG.remove(v.group); VIEWS.delete(v); }
   L2.views = [];
 }
 function needs(v) { const o = v.config()[v.outer()]; return v.isMetal ? 0 : CAP[v.outer()] - o; }
@@ -339,6 +442,7 @@ function l2Load() {
     const v = atomView();
     const e = el(z);
     v.isMetal = METALS.includes(z); v.z = z;
+    v.spin = false;   // electrons hold still while you move them; they orbit once the ions have formed
     v.build({ p: z, n: e.A - z, e: arrangement(z), sym: e.sym, kinds: v.isMetal ? ['given', 'given', 'given'] : null });
     v.group.position.set((ai - (n - 1) / 2) * gap, 1.17, -0.62);
     v.group.scale.setScalar(n === 2 ? 1.1 : 0.95);
@@ -388,6 +492,7 @@ async function placeElectron(e, to) {
   L2.tries = 0;
   L2.moves++;
   sfx.tone(1200, 0.1, 'sine', 0.1, 1600);
+  kit.sparkle(e.getWorldPosition(new THREE.Vector3()), 10, 0xffe066);
   // the metal's empty outer shell fades away
   {
     const empty = from.shells.findIndex((s, i) => s.visible && from.electrons[i].length === 0);
@@ -402,8 +507,13 @@ async function bonded() {
   const pr = PAIRS[L2.i];
   // show charges, then pull the ions together
   L2.views.forEach((v, i) => {
+    v.spin = true;
     v.sym.userData.draw(pr.ions[i], null, v.isMetal ? '#b03a2e' : '#1f4466');
     v.charge.userData.draw('', null);
+    // a soft halo shows the charge: warm for positive ions, cool for negative ions
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: v.isMetal ? ionTex.pos : ionTex.neg, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.scale.setScalar(SHELL_R[2] * 3.2); halo.position.z = -0.02; noHit(halo); v.group.add(halo);
+    tween(0.6, (k) => { halo.material.opacity = 0.32 * k; });
   });
   say('Ions formed! Opposite charges attract: this is an ionic bond.', 'good', 5);
   kit.burst(new THREE.Vector3(0, 1.2, -0.55), 40);
@@ -425,7 +535,9 @@ async function pickFormula(o) {
     score.add(L2.tries ? 3 : 10, row.position.clone().add(new THREE.Vector3(0, 0.15, 0)));
     say(`Yes: ${pr.formula}. The charges balance: ${pr.ions.join(' + ')} add up to zero.`, 'good', 5);
     setRow([]);
-    await wait(2.6);
+    await wait(1.2);
+    if (!kit.isRun(run)) return;
+    await showLattice(pr, run);
     if (!kit.isRun(run)) return;
     L2.i++; L2.tries = 0;
     if (L2.i >= PAIRS.length) { mode.kind = 'done'; clearPair(); flow.complete(['Metals lose electrons to form positive ions; non-metals gain electrons to form negative ions.']); return; }
@@ -452,11 +564,46 @@ function l2Draw() {
   });
 }
 function l2Start() {
-  mode.kind = 'bond';
+  mode.kind = 'bond'; binsShow(false);
   showMain(false); showPair(true);
   L2.i = 0;
   setRow([]);
   l2Load();
+}
+
+// The ions do not stay as a pair: millions of them pack into a giant ionic lattice. Show a small piece.
+const latticeG = new THREE.Group(); latticeG.position.set(0, 1.17, -0.62); latticeG.visible = false; scene.add(latticeG);
+const latLabel = label('', { w: 0.5, h: 0.05, bg: '#1f2b35', fg: '#f3f2ee', font: 'bold 34px system-ui, sans-serif' });
+latLabel.position.set(0, -0.19, 0.02); noHit(latLabel); latticeG.add(latLabel);
+const LAT = { NaCl: { cat: 0x9b8fd6, an: 0x5fbf6a, rc: 0.014, ra: 0.022, name: 'Sodium chloride: a giant ionic lattice' }, MgO: { cat: 0xd9d4c4, an: 0xe0574b, rc: 0.014, ra: 0.02, name: 'Magnesium oxide: a giant ionic lattice' } };
+async function showLattice(pr, run) {
+  const L = LAT[pr.formula];
+  if (!L) { await wait(1.6); return; }
+  while (latticeG.children.length > 1) latticeG.remove(latticeG.children[1]);
+  const sp = 0.048, n = 3, pts = { cat: [], an: [] };
+  for (let x = 0; x < n; x++) for (let y = 0; y < n; y++) for (let z = 0; z < n; z++) ((x + y + z) % 2 ? pts.an : pts.cat).push(new THREE.Vector3(x - 1, y - 1, z - 1).multiplyScalar(sp));
+  const sph = new THREE.SphereGeometry(1, 20, 14);
+  const ims = ['cat', 'an'].map((k) => { const im = new THREE.InstancedMesh(sph, mat(L[k], { roughness: 0.3 }), pts[k].length); latticeG.add(im); return [k, im]; });
+  // bonds as thin rods between neighbours
+  const rods = [];
+  for (const a of pts.cat) for (const b of pts.an) if (a.distanceTo(b) < sp * 1.01) rods.push([a, b]);
+  const rodIm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.0025, 0.0025, 1, 6), mat(0x8d969e, { roughness: 0.5 }), rods.length);
+  latticeG.add(rodIm);
+  const starts = { cat: pts.cat.map(() => new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.4, (Math.random() - 0.2) * 0.3)), an: pts.an.map(() => new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.4, (Math.random() - 0.2) * 0.3)) };
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const place = (k) => {
+    for (const [key, im] of ims) pts[key].forEach((p, i) => { v.lerpVectors(starts[key][i], p, k); const r = L[key === 'cat' ? 'rc' : 'ra']; im.setMatrixAt(i, m.compose(v, q.identity(), new THREE.Vector3(r, r, r))); im.instanceMatrix.needsUpdate = true; });
+    rods.forEach(([a, b], i) => { const len = a.distanceTo(b) * Math.max(0.001, k * k); v.addVectors(a, b).multiplyScalar(0.5); q.setFromUnitVectors(up, b.clone().sub(a).normalize()); rodIm.setMatrixAt(i, m.compose(v, q, new THREE.Vector3(1, len, 1))); });
+    rodIm.instanceMatrix.needsUpdate = true;
+  };
+  place(0);
+  latLabel.userData.draw(L.name, '#1f2b35');
+  pairG.visible = false; latticeG.visible = true; latticeG.rotation.set(0.35, 0.5, 0);
+  sfx.tone(330, 0.5, 'sine', 0.1, 660);
+  await tween(1.3, (k) => { place(1 - Math.pow(1 - k, 3)); latticeG.rotation.y = 0.5 + k * 0.6; });
+  kit.sparkle(latticeG.getWorldPosition(new THREE.Vector3()), 24, 0xbfe3ff);
+  await tween(1.8, (k) => { latticeG.rotation.y = 1.1 + k * 0.9; });
+  latticeG.visible = false; pairG.visible = true;
 }
 
 // ================================================================= level 3: what particle is this?
@@ -501,14 +648,15 @@ async function l3Pick(o) {
   }
 }
 function l3Start() {
-  mode.kind = 'quiz';
+  mode.kind = 'quiz'; binsShow(false);
   showMain(true); showPair(false);
   L3.order = kit.shuffle(QUIZ3.map((_, i) => i)); L3.i = 0; L3.tries = 0; L3.busy = false;
   l3Load();
 }
 
+function binsShow(v) { if (kit.carry.item && kit.carry.item.userData.token) kit.returnHome(kit.carry.item); for (const k in tokens) tokens[k].parent.visible = v; }
 function showMain(v) { main.group.visible = v; main.group.rotation.z = 0; infoG.visible = v; }
-function showPair(v) { pairG.visible = v; if (!v) clearPair(); }
+function showPair(v) { pairG.visible = v; latticeG.visible = false; if (!v) clearPair(); }
 
 // ================================================================= levels
 const flow = kit.levelFlow({
@@ -522,7 +670,7 @@ const flow = kit.levelFlow({
     footer: 'Form 3 Integrated Science: atomic structure, electron arrangement and ionic bonding.',
   },
   levels: [
-    { title: 'Build the atom', short: 'Build it', max: 100, start: l1Start },
+    { title: 'Build the atom', short: 'Build it', max: 100, start: l1Start, stop: () => { if (heldToken()) kit.returnHome(kit.carry.item); } },
     { title: 'Make ions, make a bond', short: 'Bond it', max: 80, start: l2Start, stop: () => { if (kit.carry.item) kit.returnHome(kit.carry.item); } },
     { title: 'What particle is this?', short: 'Name it', max: 60, start: l3Start },
   ],
@@ -534,4 +682,4 @@ flow.showIntro();
 kit.onKind(() => { if (mode.kind === 'build') l1Draw(); else if (mode.kind === 'bond') l2Draw(); });
 kit.start();
 
-window.game = { kit, flow, main, mode, L1, L2, L3, PAIRS, QUIZ3, board, rowBtns, rowBtn, el, arrangement, l2Load, speed: 1 };
+window.game = { kit, flow, main, mode, L1, L2, L3, PAIRS, QUIZ3, board, rowBtns, rowBtn, el, arrangement, l2Load, tokens, nucHit, latticeG, speed: 1 };
