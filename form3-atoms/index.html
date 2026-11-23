@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Atom Forge: Atoms, Ions and Bonds</title>
+<meta name="description" content="Form 3 Integrated Science VR game: build atoms from their symbols, move electrons to make ions and ionic bonds, and identify atoms, ions and isotopes. Works in the Meta Quest Browser and on desktop.">
+<link rel="stylesheet" href="../shared/game.css">
+</head>
+<body>
+<div id="loading">Loading the atom forge…</div>
+<div id="help">
+  <h1>Atom Forge: Atoms, Ions and Bonds <small>Form 3</small></h1>
+  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
+  <ul>
+    <li><b>Touch</b> a button with your fingertip, or point at it and pinch (trigger).</li>
+    <li>To add an electron, <b>pinch on a shell ring</b> (or point at it and pinch).</li>
+    <li>In the bonding level, <b>pinch an outer electron</b> to pick it up, then pinch on another atom’s outer shell to give it away.</li>
+    <li>Choose a level on the panel to your left.</li>
+  </ul>
+  <p>On a computer: <b>click</b> buttons, shells and electrons, <b>drag</b> to look around, <kbd>R</kbd> to reset the view.</p>
+  <button id="helpToggle">Hide help</button>
+</div>
+<script type="importmap">
+{ "imports": { "three": "../shared/vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
