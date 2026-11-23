@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Field Lab VR</title>
+<meta name="description" content="A-Level (Form 6) physics VR game on electromagnetism: the motor effect, charged particles in fields, the mass spectrometer and induction. Works in the Meta Quest Browser and on a computer.">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a2330; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas { display: block; touch-action: none; }
+  #help { position: absolute; top: 12px; left: 12px; max-width: 370px; background: rgba(16, 32, 48, 0.88); color: #fff; padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.45; user-select: none; }
+  #help h1 { font-size: 16px; margin: 0 0 6px; }
+  #help button { margin-top: 6px; background: #34506b; color: #fff; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  #help.min p, #help.min ul { display: none; }
+  #help ul { margin: 4px 0; padding-left: 18px; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #cde; font-size: 18px; }
+</style>
+</head>
+<body>
+<div id="loading">Loading Field Lab…</div>
+<div id="help">
+  <h1>Field Lab (A-Level Physics, Form 6)</h1>
+  <p>On a Meta Quest: press <b>ENTER VR</b> at the bottom of the page. Hands work best; controllers work the same way.</p>
+  <ul>
+    <li><b>Touch</b> panel buttons with your fingertip (or the controller tip).</li>
+    <li><b>Pinch</b> a yellow slider knob or the bar magnet and slide it, or use the − and + buttons.</li>
+    <li>For things out of reach, <b>point</b> and pinch (or pull the trigger).</li>
+    <li>Right thumbstick turns you. You do not need to walk.</li>
+  </ul>
+  <p>On a computer: <b>click</b> buttons, <b>drag</b> a slider knob or the magnet, drag the background to look around, scroll to zoom.</p>
+  <button id="helpToggle">Hide help</button>
+</div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
