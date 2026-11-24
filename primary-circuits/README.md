@@ -5,8 +5,17 @@ An original WebXR circuits game for Grades 5 to 7. It runs in the **Meta Quest B
 Hands work best (pinch and touch); controllers work the same way.
 
 The learner stands at a workbench under a msasa tree in a village homestead and helps Tendai, who
-stands by the board, waves, claps, cheers and reacts to mistakes and short circuits, with five
-missions, a night-time bonus and a free-build workshop. Every bulb, pump and spark comes from a real circuit calculation (nodal analysis), so
+stands by the board, waves, claps, cheers and reacts to mistakes and short circuits.
+
+## The story
+
+Tendai's village, Chirodzo, has no power lines, so the family learns to build its own circuits.
+The game is told in six chapters, each made of short levels. It starts with a torch for the dark
+path, then testing materials, a repair shop, lights for the family hut and a solar water pump. In the
+last chapter the learner wires up the neighbours: Gogo's kitchen, Mai Rudo's shop, the school bell
+and the clinic. Each of these is a real house in the village that lights up when its job is done.
+When every house has light, night falls and the village holds a party with fireworks and music.
+A free-build workshop (button W) stays open for experiments. Every bulb, pump and spark comes from a real circuit calculation (nodal analysis), so
 whatever the learner builds behaves like the real thing: open loops stay dark, a wire across the
 cell is a short circuit, two bulbs in series are dim and go out together, two in parallel stay bright.
 
@@ -24,20 +33,21 @@ flow of current, electric circuits, household circuits) and an *Energy and Fuels
 
 A teacher should confirm the fit against the school's current scheme of work.
 
-## The five missions
+## The chapters and levels
 
-| # | Mission | What the learner does | Syllabus link |
+| # | Chapter | Levels: what the learner does | Syllabus link |
 |---|---|---|---|
 | 1 | Make a torch | Build a complete loop with a cell, a bulb and wires; add a switch and turn it off and on. | Electric circuits, flow of current, open and closed circuits |
-| 2 | Conductor or insulator? | Put 8 everyday objects into a tester's gap, watch the bulb, and sort each one. | Conductors and insulators |
+| 2 | Conductor or insulator? | (1) Put 8 everyday objects into a tester's gap, watch the bulb, and sort each one. (2) Mend a torch whose wire is lost, choosing the one conductor from four objects. | Conductors and insulators |
 | 3 | Fix the faults | Find and fix five broken torches: switch off, missing wire, blown bulb, flat cell, short circuit. | Circuits, safety precautions (short circuits) |
-| 4 | Light up the hut | Light two rooms in series (dim; one out, both out), then in parallel (bright, independent). The hut's windows light up. | Household circuits |
+| 4 | Light up the hut | Light two rooms in series (dim; one out, both out), then in parallel (bright, independent), then give each room its own switch. The hut's windows light up. | Household circuits |
 | 5 | Solar water pump | Connect a solar panel, switch and pump; fill the garden's tank. A cloud slows the pump. | Solar energy, energy changes (light → electrical → kinetic) |
-| Bonus | Find the chickens | After mission 1, night falls: pick up your own torch and shine it around the yard to find Tendai's 3 lost chickens. | Uses of electricity, light |
-| 6 | Workshop | Free build with plenty of parts plus a buzzer and a fan, and five challenges in any order: three bulbs; a buzzer with a switch; a fan spinning both ways (turn the cell round); two cells for an extra-bright bulb; two bulbs each with its own switch. | Circuits, cells in series, household circuits |
+| 6 | Lights for the neighbours | Four jobs, each with its own parts: (1) Gogo's kitchen: two cells, one the wrong way round, so turn it round. (2) Mai Rudo's shop: three bright bulbs from one cell and only 8 wires (parallel). (3) The school bell: a light that stays on and a bell on its own switch. (4) The clinic: a light and a fan, each with its own switch. Each house lights up in the village; then the party starts. | Cells in series, parallel circuits, switches, household circuits |
+| Bonus | Find the chickens | After chapter 1, night falls: pick up your own torch and shine it around the yard to find Tendai's 3 lost chickens. | Uses of electricity, light |
+| W | Workshop | Free build with plenty of parts plus a buzzer and a fan, and five challenges in any order: three bulbs; a buzzer with a switch; a fan spinning both ways (turn the cell round); two cells for an extra-bright bulb; two bulbs each with its own switch. | Circuits, cells in series, household circuits |
 
-Each mission ends with one question. A mission gives one star for finishing and one for answering
-the question right the first time (10 stars in all). Workshop challenges are ticked off as they are
+Each chapter ends with one question. A chapter gives one star for finishing and one for answering
+the question right the first time (12 stars in all). Workshop challenges are ticked off as they are
 done. Progress is saved on the device and listed on the web page after leaving VR, so a teacher can note it.
 
 ## Look and feel
@@ -55,7 +65,7 @@ The visuals follow a short set of rules (from Meta's VR design guidance and low-
 * **Life without clutter.** Chickens peck in the yard, birds wheel over the kopjes, motes drift by day,
   fireflies and stars come out at night, light spills from the hut windows.
 * **Juicy feedback.** Parts squash into place with a puff of dust; a bulb sparkles when it first lights and
-  throws a warm pool of light on the board; a short circuit throws sparks; finished missions rain confetti.
+  throws a warm pool of light on the board; a short circuit throws sparks; finished chapters rain confetti.
   On controllers, picking, placing and flipping give a small buzz.
 * **Comfort and reading.** Big plain (non-italic) text on an unlit board, no flashing, no camera movement.
   A Read aloud button reads the board for younger readers.
@@ -69,18 +79,18 @@ The visuals follow a short set of rules (from Meta's VR design guidance and low-
   placed switch flips it; pinch and pull lifts it off. The gap that will be used is outlined in yellow
   before the pinch, and a pinch uses the gap that was outlined just before the fingers closed.
 * **Clear guidance.** Big text on the board in front, a yellow arrow on what to use next, hints after
-  25 seconds, sounds for success and mistakes, and Restart / Clear board buttons. In mission 3 the
+  25 seconds, sounds for success and mistakes, and Restart / Clear board buttons. In chapter 3 the
   arrow only appears with the hint, so learners diagnose the fault themselves first.
 * **Safety taught through play.** A wire across the cell makes it glow red and sound an alarm.
 
 ## Controls
 
 * **Quest, hands:** pinch to pick up and place; touch buttons and the switch lever; point and pinch for things out of reach.
-  In the workshop, a quick pinch on a placed cell turns it round (pinch and pull lifts it off).
+  In chapter 6 and the workshop, a quick pinch on a placed cell turns it round (pinch and pull lifts it off).
 * **Quest, controllers:** trigger (or grip) to pick up and place; touch with the controller tip, or point and pull the trigger.
 * **Computer:** click a part, then click an empty gap. Click a switch lever to flip it. Drag to look around.
-  Right-click a placed cell in the workshop to turn it round (or hover it and press F).
-  Keys: 1–6 missions (6 is the workshop), R restart, C clear board, N next mission.
+  Right-click a placed cell in chapter 6 or the workshop to turn it round (or hover it and press F).
+  Keys: 1–7 chapters (7 is the workshop), R restart (a level that sets its own board restarts just that level), C clear board, N next chapter.
 
 ## Run it locally
 
@@ -95,17 +105,20 @@ Add `?debug=1` to the address to see frame rate and input in the headset.
 ## Files
 
 * `index.html` – page, on-screen help and progress
-* `main.js` – the whole game: village, workbench, circuit solver, five missions, VR and desktop controls
+* `main.js` – the whole game: village, workbench, circuit solver, six chapters and the workshop, VR and desktop controls
 * `vendor/` – Three.js r170 and its VRButton helper (MIT licence, see `vendor/THREE-LICENSE`)
 
 ## Testing done
 
-* Desktop: an automated play-through of all five missions with real mouse clicks (circuit results,
+* Desktop: an automated play-through of chapters 1 to 5 with real mouse clicks (circuit results,
   short circuits, sorting, the five faults, restart, clear board, series and parallel, the cloud,
   questions and stars), with no page errors.
 * Desktop: the workshop (buzzer with a switch, fan both ways after a right-click turns the cell round,
   two cells adding up and cancelling when opposed, own switches, three bulbs), Read aloud, and the
-  mission-1 night bonus (pick up the torch, find all three chickens, Next clears it).
+  chapter-1 night bonus (pick up the torch, find all three chickens, Next clears it).
+* Desktop: chapter 6 level by level with real clicks (turning Gogo's cell round, three parallel bulbs
+  from 8 wires, the school bell, the clinic), each house lighting up, the party, and Restart rebuilding a level;
+  plus the new levels in chapters 2 and 4.
 * About 150 draw calls and 23,000 triangles in the main view (static scenery is baked into a few meshes).
 * Emulated Meta Quest 3 (IWER): tracked hands (pinch to pick and place, pinch in the air to return,
   poking the switch and buttons, quick pinch and pinch-and-pull on a switch) and controllers

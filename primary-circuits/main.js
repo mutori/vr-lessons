@@ -436,6 +436,72 @@ function roundHut(r, h, roofR, roofH) {
   return g;
 }
 
+// The neighbours' houses (chapter 6): each one lights up when its job is done.
+const HOUSES = [
+  { name: 'Gogo', kind: 'hut', x: -8.5, z: -8.2 },
+  { name: "Mai Rudo's shop", kind: 'shop', x: -2.6, z: -12.8, sign: "MAI RUDO'S SHOP", wall: 0xe2b845 },
+  { name: 'School', kind: 'school', x: 5.4, z: -12.2, sign: 'CHIRODZO PRIMARY SCHOOL', wall: 0xefe2c4 },
+  { name: 'Clinic', kind: 'clinic', x: 10.6, z: -5.8, sign: '✚ CLINIC', wall: 0xf4f1ea },
+];
+function signPlane(text, w, h, bg, fg) {
+  const p = canvasPlane(w, h, 160);
+  const { ctx, c } = p;
+  ctx.fillStyle = bg; roundRect(ctx, 0, 0, c.width, c.height, 10); ctx.fill();
+  let px = Math.round(c.height * 0.62);
+  do { ctx.font = `bold ${px}px system-ui, sans-serif`; px -= 2; } while (ctx.measureText(text).width > c.width - 16 && px > 8);
+  ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, c.width / 2, c.height / 2 + 1);
+  p.update();
+  p.mesh.material.toneMapped = true;
+  return p.mesh;
+}
+function buildHouse(h) {
+  const g = new THREE.Group();
+  const wm = new THREE.MeshBasicMaterial({ color: 0x2b2420 });
+  const windows = [];
+  const win = (x, y, z, w = 0.5, hh = 0.45) => {
+    g.add(part(new THREE.BoxGeometry(w + 0.1, hh + 0.1, 0.06), PAL.woodDark, [x, y, z]));
+    g.add(mesh(new THREE.PlaneGeometry(w, hh), wm, x, y, z + 0.035));
+    windows.push(V3(x, y, z + 0.25));
+  };
+  if (h.kind === 'hut') {
+    g.add(roundHut(1.2, 1.6, 1.75, 1.3));
+    g.add(part(new THREE.BoxGeometry(0.66, 1.3, 0.06), 0x6e4527, [0, 0.66, 1.21]));
+    win(0.7, 1.0, 0.98, 0.4, 0.36);
+  } else {
+    const W = h.kind === 'school' ? 5 : h.kind === 'shop' ? 3 : 3.6, H = 2.3, D = 2.6;
+    g.add(part(new THREE.BoxGeometry(W, H, D), h.wall, [0, H / 2, 0]));
+    g.add(part(new THREE.BoxGeometry(W + 0.04, 0.5, D + 0.04), h.kind === 'clinic' ? 0x3f8a5a : h.kind === 'school' ? 0x9b4a2c : 0x7a5a2a, [0, 0.25, 0]));   // painted plinth band
+    // corrugated tin roof: a shallow gable for the school and clinic, a lean-to for the shop
+    const tin = 0x9aa1a6;
+    if (h.kind === 'shop') g.add(part(new THREE.BoxGeometry(W + 0.5, 0.06, D + 0.8), tin, [0, H + 0.2, 0.15], [0.16, 0, 0]));
+    else for (const s of [-1, 1]) g.add(part(new THREE.BoxGeometry(W + 0.4, 0.06, D / 2 + 0.45), s < 0 ? tin : 0x868d92, [0, H + 0.32, s * (D / 4 + 0.08)], [s * 0.3, 0, 0]));
+    if (h.kind !== 'shop') g.add(part(new THREE.CylinderGeometry(0.02, 0.02, W, 4, 1), 0x6a7075, [0, H + 0.62, 0], [0, 0, Math.PI / 2]));
+    if (h.kind !== 'shop') for (const s of [-1, 1]) g.add(part(new THREE.CylinderGeometry(D / 2 + 0.05, D / 2 + 0.05, 0.04, 3, 1), h.wall, [s * (W / 2 - 0.02), H + 0.0, 0], [0, 0, Math.PI / 2], [1, 1, 0.42]));
+    g.add(part(new THREE.BoxGeometry(0.8, 1.6, 0.06), h.kind === 'clinic' ? 0x3f8a5a : 0x6e4527, [h.kind === 'school' ? -1.6 : -0.6, 0.8, D / 2 + 0.01]));
+    if (h.kind === 'school') { win(-0.3, 1.25, D / 2); win(0.8, 1.25, D / 2); win(1.9, 1.25, D / 2); }
+    else win(0.6, 1.25, D / 2);
+    const sign = signPlane(h.sign, Math.min(W - 0.2, 2.8), 0.36, h.kind === 'clinic' ? '#ffffff' : '#13293d', h.kind === 'clinic' ? '#c0392b' : '#ffd84d');
+    sign.position.set(0, H - 0.25, D / 2 + 0.04);
+    g.add(sign);
+  }
+  g.position.set(h.x, 0, h.z);
+  g.rotation.y = Math.atan2(-h.x, -h.z);
+  const glows = windows.map((wp) => {
+    const glow = noHit(new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xffc070, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })));
+    glow.position.copy(wp); glow.scale.setScalar(1.4);
+    g.add(glow);
+    return glow;
+  });
+  const pool = noHit(new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.2).rotateX(-Math.PI / 2), additive(0xffa850, 0)));
+  pool.position.set(0, 0.025, (h.kind === 'hut' ? 1.2 : 1.3) + 1.1);
+  g.add(pool);
+  const tag = tagSprite(h.name, { scale: 0.22 });
+  tag.position.set(0, h.kind === 'hut' ? 3.4 : 3.3, 0);
+  g.add(tag);
+  return { group: g, wm, glows, pool, level: 0 };
+}
+
 function buildWorld() {
   const sky = noHit(new THREE.Mesh(new THREE.SphereGeometry(110, 32, 16), skyMat));
   sky.renderOrder = -1;
@@ -479,6 +545,7 @@ function buildWorld() {
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (z > 1 && Math.abs(x) < 6) continue;   // keep the space behind the learner open
     if (Math.abs(x - 3.5) < 3 && z < -1 && z > -9) continue;   // keep the sun's side open over the pump
+    if (HOUSES.some((h) => Math.hypot(h.x - x, h.z - z) < 4)) continue;
     const s = rr(0.8, 1.35);
     scenery.add(i % 4 === 3 ? roundTree(x, z, s) : msasa(x, z, s, msasaCols[i % 3]));
     blobs.add(blob(x, z, 1.6 * s));
@@ -539,6 +606,12 @@ function buildWorld() {
   mergeStatic(hut);
   blobs.add(blob(hutPos.x, hutPos.z, 2.3));
 
+  world.houses = HOUSES.map((h) => {
+    const house = buildHouse(h);
+    scenery.add(house.group);
+    blobs.add(blob(h.x, h.z, h.kind === 'school' ? 3.2 : 2.2));
+    return house;
+  });
   // a granary on stilts, a cooking hut fire-pit of three stones, and a clay pot
   {
     const gr = roundHut(0.62, 0.8, 0.95, 0.9);
@@ -686,7 +759,7 @@ function buildWorld() {
   world.clouds = cloudsMesh;
 
   // cable from the solar panel to the workbench (mission 5)
-  const curve = new THREE.CatmullRomCurve3([V3(0.27, 0.792, -0.41), V3(0.5, 0.79, -0.52), V3(0.76, 0.6, -0.62), V3(1.2, 0.03, -1.0), V3(2.05, 0.03, -3.3), V3(2.16, 0.4, -3.55), V3(2.18, 1.6, -3.58)]);
+  const curve = new THREE.CatmullRomCurve3([V3(0.27, 0.792, -0.435), V3(0.5, 0.79, -0.54), V3(0.76, 0.6, -0.62), V3(1.2, 0.03, -1.0), V3(2.05, 0.03, -3.3), V3(2.16, 0.4, -3.55), V3(2.18, 1.6, -3.58)]);
   world.cable = noHit(mesh(new THREE.TubeGeometry(curve, 60, 0.012, 6), lam(0x1d1d1d)));
   world.cable.visible = false;
   scene.add(world.cable);
@@ -850,7 +923,7 @@ buildWorld();
 const TABLE_Y = 0.78;
 const S = 0.1;                    // spacing between board terminals (m)
 const NX = 5, NZ = 3;             // terminals across and deep
-const BOARD_Z = -0.36;
+const BOARD_Z = -0.385;
 const bench = new THREE.Group();
 scene.add(bench);
 {
@@ -1426,7 +1499,7 @@ function compName(c) {
   return c.type;
 }
 // A placed switch flips on a quick pinch; in the workshop a placed cell turns round the same way.
-function quickToggles(c) { return !!c.slot && !c.locked && (c.type === 'switch' || (c.type === 'cell' && !c.flat && isWorkshop())); }
+function quickToggles(c) { return !!c.slot && !c.locked && (c.type === 'switch' || (c.type === 'cell' && !c.flat && (isWorkshop() || !!MISSIONS[state.mission]?.flipCells))); }
 function cellPlusSide(c) {
   const toB = !c.rev;
   return c.slot.dir === 'h' ? (toB ? 'on the right' : 'on the left') : (toB ? 'nearer you' : 'away from you');
@@ -1825,17 +1898,17 @@ function hideAnswers() {
 
 // ---------------------------------------------------------------- controls strip (front edge of the table)
 const controls = new THREE.Group();
-controls.position.set(0, TABLE_Y + 0.035, -0.158);
+controls.position.set(0, TABLE_Y + 0.03, -0.15);
 controls.rotation.x = -Math.PI / 2 + 0.75;
 scene.add(controls);
-controls.add(part(new THREE.BoxGeometry(0.83, 0.072, 0.014), PAL.woodDark, [0, 0, -0.014]));
-controls.add(part(new THREE.BoxGeometry(0.83, 0.012, 0.03), PAL.wood, [0, -0.04, -0.006]));
+controls.add(part(new THREE.BoxGeometry(0.87, 0.072, 0.014), PAL.woodDark, [-0.01, 0, -0.014]));
+controls.add(part(new THREE.BoxGeometry(0.87, 0.012, 0.03), PAL.wood, [-0.01, -0.04, -0.006]));
 const missionButtons = [];
-const MISSION_COLOURS = ['#c0392b', '#2471a3', '#7d3c98', '#b9770e', '#1e8449', '#16766f'];
-const MISSION_NAMES = ['Make a torch', 'Conductor or insulator?', 'Fix the faults', 'Light up the hut', 'Solar water pump', 'Workshop: free build'];
-for (let i = 0; i < 6; i++) {
-  const b = makeButton(String(i + 1), 0.05, 0.05, () => startMission(i), { bg: MISSION_COLOURS[i], font: 'bold 22px system-ui, sans-serif', name: `${i < 5 ? 'Mission ' + (i + 1) : 'Workshop'}: ${MISSION_NAMES[i]}` });
-  b.position.set(-0.385 + i * 0.056, 0, 0);
+const MISSION_COLOURS = ['#c0392b', '#2471a3', '#7d3c98', '#b9770e', '#1e8449', '#a04070', '#16766f'];
+const MISSION_NAMES = ['Make a torch', 'Conductor or insulator?', 'Fix the faults', 'Light up the hut', 'Solar water pump', 'Lights for the neighbours', 'Workshop: free build'];
+for (let i = 0; i < 7; i++) {
+  const b = makeButton(i < 6 ? String(i + 1) : 'W', 0.046, 0.05, () => startMission(i), { bg: MISSION_COLOURS[i], font: 'bold 21px system-ui, sans-serif', name: i < 6 ? `Chapter ${i + 1}: ${MISSION_NAMES[i]}` : MISSION_NAMES[i] });
+  b.position.set(-0.41 + i * 0.051, 0, 0);
   controls.add(b);
   missionButtons.push(b);
 }
@@ -1855,7 +1928,7 @@ function boardSpeech() {
   const m = MISSIONS[state.mission];
   if (state.phase === 'question') return m.question.q + ' ' + state.qOrder.map((k, i) => `Answer ${i + 1}: ${m.question.options[k]}`).join('. ');
   if (state.phase === 'complete' && state.hunt) return 'Night has fallen. Pick up your torch and shine it around the yard to find Tendai\'s lost chickens.';
-  if (state.phase === 'complete') return 'Mission complete! Well done.';
+  if (state.phase === 'complete') return 'Chapter complete! Well done.';
   if (m.workshop) { const next = CHALLENGES.find((c, i) => !saved.ws[i]); return m.story + (next ? ' Next challenge: ' + next.text : ''); }
   const st = m.steps[state.step];
   return (state.step === 0 ? m.story + ' ' : '') + st.text + (state.stepT > 25 ? ' Hint: ' + st.hint : '');
@@ -1933,7 +2006,7 @@ function activateHit(hit, p) {
   if (hit.button) { pressButton(hit.button); return; }
   const c = hit.comp;
   if (!c) return;
-  if (c.locked) { sfx.bad(); toast('That part is fixed to the board for this mission.', 'warn'); return; }
+  if (c.locked) { sfx.bad(); toast('That part is fixed to the board for this level.', 'warn'); return; }
   // pointing at a placed switch flips it (in VR, anywhere on it; with a mouse, on the lever).
   // To take a placed switch off the board: pinch it and pull, or click its base.
   if (c.type === 'switch' && c.slot && (hit.lever || p)) { toggleSwitch(c, p ? 'ray' : 'click'); return; }
@@ -1954,12 +2027,21 @@ function hoverText4(hit) {
 }
 
 // ---------------------------------------------------------------- game state and missions
-const SAVE_KEY = 'light-up-village-v1';
-let saved = { stars: [0, 0, 0, 0, 0, 0], done: [false, false, false, false, false, false], ws: [false, false, false, false, false] };
-try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && Array.isArray(s.stars)) Object.assign(saved, s); } catch { /* storage blocked */ }
-while (saved.stars.length < 6) saved.stars.push(0);
-while (saved.done.length < 6) saved.done.push(false);
+// Save: stars and done for the six chapters and the workshop, workshop challenges, and the neighbours' lit houses.
+const SAVE_KEY = 'light-up-village-v2';
+let saved = { stars: [0, 0, 0, 0, 0, 0, 0], done: [false, false, false, false, false, false, false], ws: [false, false, false, false, false], houses: [false, false, false, false] };
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+  if (s && Array.isArray(s.stars)) Object.assign(saved, s);
+  else {   // first visit since the story update: keep the five missions' stars from before
+    const old = JSON.parse(localStorage.getItem('light-up-village-v1') || 'null');
+    if (old && Array.isArray(old.stars)) for (let i = 0; i < 5; i++) { saved.stars[i] = old.stars[i] || 0; saved.done[i] = !!old.done?.[i]; }
+  }
+} catch { /* storage blocked */ }
+while (saved.stars.length < 7) saved.stars.push(0);
+while (saved.done.length < 7) saved.done.push(false);
 if (!Array.isArray(saved.ws)) saved.ws = [false, false, false, false, false];
+if (!Array.isArray(saved.houses)) saved.houses = [false, false, false, false];
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(saved)); } catch { /* storage blocked */ } }
 
 const state = {
@@ -1967,7 +2049,7 @@ const state = {
   sorted: 0, sortedRight: 0, sawOff: false, fault: null, cloud: null, decor: [], wrongAnswers: new Set(),
   fanDirs: new Set(), hunt: null, boardVer: 0, wsVer: -1,
 };
-const WORKSHOP = 5;
+const WORKSHOP = 6, NEIGHBOURS = 5;
 const isWorkshop = () => state.mission === WORKSHOP;
 const PRAISE = ['Yes! Well done!', 'It works!', 'Great thinking!', 'You did it!', 'Super!', 'Brilliant!'];
 function toast(text, kind = 'info', secs = 7) { state.toast = { text, kind, until: time + secs }; boardDirty = true; }
@@ -1995,10 +2077,27 @@ function buildTorch({ cell = {}, bulb = {}, sw = null, skip = null, locked = fal
   return parts;
 }
 function addDecor(o) { state.decor.push(o); return o; }
+// A gap between two crocodile clips that only takes test objects (mission 2).
+function makeGap(c1, r1, c2, r2, off) {
+  const g = slotAt(c1, r1, c2, r2);
+  g.gap = true;
+  const vertical = g.dir === 'v';
+  [[c1, r1], [c2, r2]].forEach(([c, r], k) => {
+    const clip = new THREE.Group();
+    clip.add(mesh(new THREE.BoxGeometry(0.014, 0.012, 0.022), mat(k === 0 ? 0xd63a2f : 0x2a2a2a), 0, 0.006, 0));
+    clip.add(mesh(new THREE.BoxGeometry(0.01, 0.004, 0.012), M.steel, 0, 0.013, 0));
+    clip.position.copy(nodePos(node(c, r))).add(vertical ? V3(off, 0, 0) : V3(0, 0, off));
+    if (!vertical) clip.rotation.y = Math.PI / 2;
+    board.add(addDecor(noHit(clip)));
+  });
+  g.ghost.material.color.set(0xffc107); g.ghost.material.opacity = 0.8;
+  addDecor({ removeFromParent() { g.ghost.material.color.set(0x6b4a2c); g.ghost.material.opacity = 0.35; } });
+  return g;
+}
 
 const MISSIONS = [
   {
-    title: 'Make a torch', short: 'Torch', intro: "I walk to the borehole after dark. Please build me a torch!",
+    title: 'Make a torch', short: 'Torch', intro: "Mhoro! I'm Tendai. Our village has no power lines, so we build our own circuits. First, a torch for the dark path!", outro: 'My torch works! Thank you!',
     story: 'Tendai walks to the borehole after dark. Build a torch so the path is safe.',
     tray() { addSpawner('cell', 1); addSpawner('bulb', 1); addSpawner('wire', Infinity); addSpawner('switch', 1); },
     steps: [
@@ -2032,21 +2131,11 @@ const MISSIONS = [
     },
   },
   {
-    title: 'Conductor or insulator?', short: 'Materials', intro: "Which things let electricity through? Let's test them!",
+    title: 'Conductor or insulator?', short: 'Materials', intro: "Which things let electricity through? Let's test them!", outro: 'Now we know which things carry electricity!',
     story: 'This tester has a gap between two clips. Which things let electricity pass through them?',
     setup() {
-      slotAt(1, 1, 1, 2).gap = true;
       buildTorch({ locked: true, gapLeft: true });
-      for (const r of [1, 2]) {
-        const clip = new THREE.Group();
-        clip.add(mesh(new THREE.BoxGeometry(0.014, 0.012, 0.022), mat(r === 1 ? 0xd63a2f : 0x2a2a2a), 0, 0.006, 0));
-        clip.add(mesh(new THREE.BoxGeometry(0.01, 0.004, 0.012), M.steel, 0, 0.013, r === 1 ? 0.01 : -0.01));
-        clip.position.copy(nodePos(node(1, r))).add(V3(-0.014, 0, 0));
-        board.add(addDecor(noHit(clip)));
-      }
-      const g = slotAt(1, 1, 1, 2);
-      g.ghost.material.color.set(0xffc107); g.ghost.material.opacity = 0.8;
-      addDecor({ removeFromParent() { g.ghost.material.color.set(0x6b4a2c); g.ghost.material.opacity = 0.35; } });
+      makeGap(1, 1, 1, 2, -0.014);
       state.sorted = 0; state.sortedRight = 0;
     },
     tray() { Object.keys(OBJECTS).forEach((k, i) => addSpawner('object', 1, { kind: k }, [0, 4, 1, 5, 2, 6, 3, 7][i])); },
@@ -2057,6 +2146,7 @@ const MISSIONS = [
         check: () => state.sorted >= 8,
         status: () => `Sorted: ${state.sorted} of 8`,
         done: 'All sorted! Metals are conductors. Plastic, rubber and wood are insulators.',
+        level: 'Sort the objects',
         arrow: () => {
           const g = slotAt(1, 1, 1, 2);
           if (g.comp) return answer.buttons[0];
@@ -2064,8 +2154,22 @@ const MISSIONS = [
           return sp ? sp.display.group : null;
         },
       },
+      {
+        rebuild: true, level: 'Mend the torch',
+        text: 'Tendai dropped the torch and a wire is lost! Mend it with one of the things on the tray. Which one will work?',
+        hint: 'Only a conductor lets the current through. Which of these things is made of metal?',
+        tray() { ['ruler', 'nail', 'band', 'stick'].forEach((k, i) => addSpawner('object', 1, { kind: k }, [0, 4, 1, 5][i])); },
+        enter: () => { buildTorch({ locked: true, skip: 'w3' }); makeGap(3, 1, 3, 0, 0.016); },
+        check: () => placedOf('bulb').some((b) => isOn(live, b)),
+        done: 'The torch works again! The iron nail is a conductor, so it closed the loop.',
+        arrow: () => { const sp = spawners.find((x) => x.display && x.opts.kind === 'nail'); return state.stepT > 25 && sp ? sp.display.group : null; },
+      },
     ],
-    onPlace(c) { if (c.type === 'object') askSort(c); },
+    onPlace(c) {
+      if (c.type !== 'object') return;
+      if (state.step === 0) { askSort(c); return; }
+      if (!OBJECTS[c.kind].conductor) { sfx.bad(); tendai.act('shrug', 1.6); tendai.say('Still dark. Try something else!', 2.5); toast(`The ${OBJECTS[c.kind].name.toLowerCase()} is an insulator, so the torch stays dark. Try another object.`, 'warn', 5); }
+    },
     onPick(c) { if (c.type === 'object' && state.phase === 'build') hideAnswers(); },
     question: {
       q: 'Why are electric wires covered in plastic?',
@@ -2074,7 +2178,7 @@ const MISSIONS = [
     },
   },
   {
-    title: 'Fix the faults', short: 'Faults', intro: "Five torches are broken. Can you find what is wrong?",
+    title: 'Fix the faults', short: 'Faults', intro: "Five torches are broken at the repair shop. Can you find what is wrong?", outro: 'Every torch works again. You are a good fixer!',
     story: 'Five torches at the village workshop do not work. Find each fault and fix it.',
     tray() { addSpawner('wire', Infinity); addSpawner('bulb', 2); addSpawner('cell', 2); },
     steps: [
@@ -2115,7 +2219,7 @@ const MISSIONS = [
         check: () => torchWorks(), done: 'Fault 5: a short circuit. The current took an easy path and skipped the bulb. Short circuits make wires hot and can start fires.',
       },
     ],
-    arrowAfterHint: true,
+    arrowAfterHint: true, perStep: true,
     question: {
       q: 'What is a short circuit?',
       options: ['The current takes an easy path back to the cell and skips the bulb.', 'The wires are too short to reach.', 'The bulb is too bright.'],
@@ -2123,7 +2227,7 @@ const MISSIONS = [
     },
   },
   {
-    title: 'Light up the hut', short: 'Series and parallel', sky: 'dusk', intro: "It's getting dark. Help me light up our hut!",
+    title: 'Light up the hut', short: 'Series and parallel', sky: 'dusk', intro: "It's getting dark. Help me light up our hut!", outro: 'Our hut glows at night!',
     story: 'It is getting dark. Tendai\'s home has two rooms, and each room needs a light.',
     tray() { addSpawner('cell', 1); addSpawner('bulb', 1, { room: 1 }); addSpawner('bulb', 1, { room: 2 }, 2); addSpawner('wire', Infinity, {}, 3); },
     steps: [
@@ -2148,6 +2252,16 @@ const MISSIONS = [
         status: () => { const b = placedOf('bulb'); return b.length ? 'Bulbs: ' + b.map((x) => `Room ${x.room} ${brightness(live, x) > 0.55 ? 'BRIGHT' : brightness(live, x) > 0.1 ? 'dim' : 'off'}`).join(', ') : ''; },
         done: 'Both bulbs are bright, and each one has its own path. Houses are wired in parallel.',
       },
+      {
+        level: 'A switch for each room',
+        text: 'Tendai\'s little brother sleeps in room 2. Give EACH room its own switch, so one light can be off while the other is on. Then turn both lights on.',
+        hint: 'Keep your parallel circuit. Swap the wire next to each bulb for a switch, so each bulb\'s own path has a switch in it.',
+        enter: () => { addSpawner('switch', 2, {}, 4); },
+        check: () => ownSwitches(placedOf('bulb')),
+        status: () => `Switches placed: ${placedOf('switch').length} of 2`,
+        done: 'Each room has its own switch, just like a real house!',
+        arrow: () => (placedOf('switch').length < 2 ? traySpot('switch') : null),
+      },
     ],
     question: {
       q: 'Why are the lights in a house wired in parallel?',
@@ -2156,7 +2270,7 @@ const MISSIONS = [
     },
   },
   {
-    title: 'Solar water pump', short: 'Solar energy', intro: "The garden is thirsty. Let's pump water with sunshine!",
+    title: 'Solar water pump', short: 'Solar energy', intro: "The garden is thirsty. Let's pump water with sunshine!", outro: 'Water from the sun! Now the neighbours want light too.',
     story: 'The garden needs water. Use energy from the sun to run a water pump.',
     setup() {
       const p = makeComp('panel', { locked: true }); scene.add(p.group); place(p, slotAt(4, 0, 4, 1), true);
@@ -2188,6 +2302,61 @@ const MISSIONS = [
     },
   },
   {
+    title: 'Lights for the neighbours', short: 'Neighbours', perStep: true, flipCells: true, sky: 'dusk',
+    intro: 'Everyone wants light for the big village party tonight. Will you help our neighbours?',
+    story: 'Four neighbours need light before the party. Each job has its own parts, so plan before you build.',
+    outro: 'Every house has light. Let\'s celebrate!',
+    tray() {},
+    steps: [
+      {
+        house: 0, level: "Gogo's kitchen",
+        text: "Gogo's kitchen light has TWO cells, but it stays dark! Make the bulb extra bright.",
+        hint: 'One cell is the wrong way round, so the two cells push against each other. Pinch it quickly (or right-click it) to turn it round.',
+        tray: () => { addSpawner('cell', 1); addSpawner('wire', Infinity); },
+        enter: () => {
+          const add = (type, o, a) => { const c = makeComp(type, o); scene.add(c.group); place(c, a, true); };
+          add('cell', {}, slotAt(1, 0, 2, 0)); add('cell', { rev: true }, slotAt(2, 0, 3, 0)); add('bulb', {}, slotAt(3, 0, 3, 1));
+          add('wire', { colour: 1 }, slotAt(2, 1, 3, 1)); add('wire', { colour: 1 }, slotAt(1, 1, 2, 1)); add('wire', { colour: 0 }, slotAt(1, 0, 1, 1));
+        },
+        check: () => placedOf('bulb').some((b) => brightness(live, b) > 1.8),
+        done: "Gogo's kitchen is bright! Cells in a row add their pushes, but only when + meets −.",
+      },
+      {
+        house: 1, level: "Mai Rudo's shop",
+        text: "Mai Rudo's shop needs THREE bright bulbs. You have only ONE cell and 8 wires.",
+        hint: 'In series the bulbs share the push and are dim. Give each bulb its own path to the cell (parallel).',
+        tray: () => { addSpawner('cell', 1); addSpawner('bulb', 3); addSpawner('wire', 8); },
+        check: () => { const b = placedOf('bulb'); return b.length >= 3 && b.filter((x) => brightness(live, x) > 0.55).length >= 3; },
+        status: () => { const b = placedOf('bulb'); return b.length ? 'Bulbs: ' + b.map((x) => (brightness(live, x) > 0.55 ? 'BRIGHT' : brightness(live, x) > 0.1 ? 'dim' : 'off')).join(', ') : ''; },
+        done: 'The shop is bright! Parallel paths keep every bulb bright.',
+      },
+      {
+        house: 2, level: 'The school bell',
+        text: 'At the school, the classroom light must stay ON all the time, but the bell (buzzer) must ring ONLY when the switch is ON.',
+        hint: 'Give the bulb and the buzzer separate paths to the cell. Put the switch only in the buzzer\'s path.',
+        tray: () => { addSpawner('cell', 1, {}, 0); addSpawner('switch', 1, {}, 1); addSpawner('wire', Infinity, {}, 2); addSpawner('bulb', 1, {}, 4); addSpawner('buzzer', 1, {}, 6); },
+        check: () => {
+          const bz = placedOf('buzzer')[0], b = placedOf('bulb')[0], sw = placedOf('switch')[0];
+          return !!bz && !!b && !!sw && sw.closed && isOn(live, b) && isOn(live, bz) && switchControls(sw, bz) && !switchControls(sw, b);
+        },
+        done: 'Ring ring! The bell has its own switch, and the classroom light stays on.',
+      },
+      {
+        house: 3, level: 'The clinic',
+        text: 'The night nurse at the clinic needs a light and a fan, EACH with its own switch. Build it and turn both on.',
+        hint: 'Two paths from the cell: one with the bulb and a switch, the other with the fan and a switch.',
+        tray: () => { addSpawner('cell', 1, {}, 0); addSpawner('switch', 2, {}, 1); addSpawner('wire', Infinity, {}, 2); addSpawner('bulb', 1, {}, 4); addSpawner('motor', 1, { kind: 'fan' }, 6); },
+        check: () => ownSwitches([...placedOf('bulb'), ...placedOf('motor')]),
+        done: 'The clinic has light and a cool breeze. Thank you!',
+      },
+    ],
+    question: {
+      q: "Gogo's bulb stayed dark with two cells. Why?",
+      options: ['One cell was the wrong way round, so the two cells pushed against each other.', 'Two cells are too many for one bulb.', 'The wires were too long.'],
+      explain: 'Think about which way each cell pushes the current.',
+    },
+  },
+  {
     title: 'Workshop: free build', short: 'Workshop', workshop: true,
     intro: 'The workshop is yours! Build anything. Can you do my five challenges?',
     story: 'Plenty of parts, two new ones (a buzzer and a fan), and five challenges. Build whatever you like.',
@@ -2212,8 +2381,8 @@ const CHALLENGES = [
   { text: 'Light two bulbs, each with its OWN switch.', hint: 'Give each bulb its own path to the cell, and put a switch in each path, like the rooms of a house.',
     check: () => ownSwitches() },
 ];
-function ownSwitches() {
-  const b = placedOf('bulb').filter((x) => !x.blown), sw = placedOf('switch');
+function ownSwitches(loads = placedOf('bulb')) {
+  const b = loads.filter((x) => !x.blown), sw = placedOf('switch');
   if (b.length < 2 || sw.length < 2) return false;
   for (const s1 of sw) for (const b1 of b) {
     if (!s1.closed || !switchControls(s1, b1)) continue;
@@ -2269,6 +2438,7 @@ function resetBoard() {
   world.cloud.visible = false;
   world.sun = 1;
   endHunt();
+  state.party = null;
 }
 function startMission(i) {
   resetBoard();
@@ -2285,34 +2455,42 @@ function startMission(i) {
   boardDirty = true;
 }
 function drawMissionButtons() {
-  missionButtons.forEach((b, k) => b.userData.draw(saved.done[k] ? '✓' + (k + 1) : String(k + 1), k === state.mission ? '#f1c40f' : MISSION_COLOURS[k]));
+  missionButtons.forEach((b, k) => { const l = k === WORKSHOP ? 'W' : String(k + 1); b.userData.draw(saved.done[k] ? '✓' + l : l, k === state.mission ? '#f1c40f' : MISSION_COLOURS[k]); });
 }
 function enterStep(k) {
   state.step = k; state.stepT = 0;
-  MISSIONS[state.mission].steps[k].enter?.();
+  const st = MISSIONS[state.mission].steps[k];
+  st.enter?.();
+  if (k > 0 && st.level) { tendai.act('wave', 1.5); tendai.say('Next: ' + st.level + '!', 3); }
   boardDirty = true;
 }
-// Restart: missions that set up each step (the five torches) restart the current step.
+// Levels that set up their own board (the five torches, the neighbours' houses) restart just that level.
+const rebuilds = (m, k) => !!(m.perStep || m.steps[k]?.rebuild);
+function clearForLevel() {
+  for (const p of input.pointers) p.held = null;
+  desk.held = null;
+  for (const c of [...comps]) disposeComp(c);
+  clearSpawners();
+  for (const d of state.decor) d.removeFromParent();
+  state.decor = [];
+  for (const s of slots) { s.comp = null; s.gap = false; }
+  circuit.short = false;
+}
 function restartStep() {
   const m = MISSIONS[state.mission];
-  if (state.mission === 2 && state.phase === 'build') {
-    const k = state.step;
+  const k = state.step;
+  if (state.phase === 'build' && k > 0 && rebuilds(m, k) || (state.phase === 'build' && m.perStep)) {
     state.pending = 0;
-    for (const p of input.pointers) p.held = null;
-    desk.held = null;
-    for (const c of [...comps]) disposeComp(c);
-    clearSpawners();
-    for (const s of slots) s.comp = null;
-    circuit.short = false;
-    m.tray();
+    clearForLevel();
+    (m.steps[k].tray || m.tray)();
     enterStep(k);
-    toast('Torch ' + (k + 1) + ' is back as it was.', 'info', 3);
+    toast(`Level ${k + 1} is back as it was.`, 'info', 3);
     return;
   }
   startMission(state.mission);
 }
 function nextMission() {
-  if (state.phase !== 'complete') { sfx.bad(); toast('Finish this mission first. Next lights up when you are done.', 'warn', 4); return; }
+  if (state.phase !== 'complete') { sfx.bad(); toast('Finish this chapter first. Next lights up when you are done.', 'warn', 4); return; }
   startMission((state.mission + 1) % MISSIONS.length);
 }
 function drawNext() {
@@ -2389,15 +2567,15 @@ function completeMission() {
   state.phase = 'complete';
   state.lastStars = stars;
   hideAnswers();
-  missionButtons[i].userData.draw('✓' + (i + 1), '#f1c40f');
+  drawMissionButtons();
   drawNext();
   updatePageResults();
   if (i === 3) world.windows.forEach((w) => (w.keep = true));
   confetti();
   tendai.act('cheer', 3);
-  tendai.say(i === WORKSHOP ? 'All five challenges! You are a real electrician!' : `Mission complete! ${'★'.repeat(stars)}`, 4);
+  tendai.say(i === WORKSHOP ? 'All five challenges! You are a real electrician!' : (MISSIONS[i].outro || `Chapter complete! ${'★'.repeat(stars)}`), 4);
   if (i === 0) state.huntAt = time + 2.6;
-  else if (saved.done.slice(0, 5).every(Boolean) && i < WORKSHOP) setSky('dusk', 3);
+  if (i === NEIGHBOURS) startParty();
   boardDirty = true;
 }
 
@@ -2465,6 +2643,48 @@ function updateHunt(dt) {
     }
   });
 }
+// ---------------------------------------------------------------- the neighbours' houses and the village party
+function lightHouse(i) {
+  if (!saved.houses[i]) { saved.houses[i] = true; save(); }
+  const h = world.houses[i];
+  const p = h.group.getWorldPosition(new THREE.Vector3()).add(V3(0, 3.2, 0));
+  burst(p, { n: 40, colours: [0xffe9a0, 0xffffff, 0xffc060], speed: 2.2, up: 1.5, life: 1.6, size: 0.06, gravity: 1.2 });
+  tone(523, 0.2, 'triangle', 0.08); tone(784, 0.3, 'triangle', 0.08, null, 0.15);
+}
+function startParty() {
+  state.party = { t: 0, nextPop: 0 };
+  world.windows.forEach((w) => (w.keep = true));
+  setSky('night', 3);
+  saved.houses = saved.houses.map(() => true); save();
+  toast('Every house has light! The village party begins.', 'good', 10);
+}
+const PARTY_TUNE = [523, 659, 784, 659, 698, 880, 784, 0, 523, 659, 784, 1047, 988, 784, 880, 0];
+function updateHouses(dt) {
+  world.houses.forEach((h, i) => {
+    const target = saved.houses[i] ? 1 : 0;
+    h.level += (target - h.level) * Math.min(1, dt * 3);
+    const party = state.party ? 0.85 + 0.15 * Math.sin(time * 6 + i) : 1;
+    h.wm.color.setRGB(0.17 + 0.83 * h.level * party, 0.14 + 0.68 * h.level * party, 0.12 + 0.36 * h.level);
+    const k = h.level * (0.3 + 0.7 * world.dusk);
+    h.glows.forEach((g) => (g.material.opacity = k));
+    h.pool.material.opacity = h.level * world.dusk * 0.7;
+  });
+  const pt = state.party;
+  if (!pt) return;
+  pt.t += dt;
+  // fireworks over the kopjes, a little tune, and Tendai dancing
+  if (pt.t < 40 && time > pt.nextPop) {
+    pt.nextPop = time + 0.5 + Math.random() * 0.7;
+    const at = V3((Math.random() - 0.5) * 20, 8 + Math.random() * 5, -12 - Math.random() * 6);
+    burst(at, { n: 70, colours: [CONFETTI[Math.floor(Math.random() * CONFETTI.length)], 0xffffff], speed: 4.5, up: 0.15, life: 2, size: 0.22, gravity: 1.0 });
+    tone(140 + Math.random() * 60, 0.25, 'sine', 0.08, 60);
+  }
+  if (pt.t < 16) {
+    const beat = Math.floor(pt.t * 4);
+    if (beat !== pt.beat) { pt.beat = beat; const f = PARTY_TUNE[beat % PARTY_TUNE.length]; if (f) tone(f, 0.2, 'triangle', 0.05); }
+  }
+  if (pt.t < 40) tendai.act(Math.floor(pt.t / 2) % 2 ? 'cheer' : 'clap', 0.3);
+}
 function cluck() { tone(700, 0.06, 'square', 0.06, 1100); tone(900, 0.08, 'square', 0.05, 600, 0.09); }
 
 // ---------------------------------------------------------------- per-frame mission logic
@@ -2487,12 +2707,14 @@ function updateGame(dt) {
       state.pending -= dt;
       if (state.pending <= 0) {
         if (state.step + 1 < m.steps.length) {
-          if (state.mission === 2) {   // the next broken torch replaces this one
+          const nk = state.step + 1;
+          if (m.steps[nk].tray) { clearForLevel(); m.steps[nk].tray(); }
+          else if (rebuilds(m, nk)) {   // the next broken torch replaces this one
             for (const c of [...comps]) if (c.slot || !c.spawner) disposeComp(c);
             for (const s of slots) s.comp = null;
             for (const sp of spawners) refillSpawner(sp);
           }
-          enterStep(state.step + 1);
+          enterStep(nk);
         } else askQuestion();
       }
     } else {
@@ -2500,8 +2722,10 @@ function updateGame(dt) {
       if (st.check()) {
         sfx.good();
         tendai.act('clap', 1.6); tendai.say(PRAISE[(state.mission + state.step) % PRAISE.length], 2.5);
-        toast(st.done, 'good', state.mission === 2 ? 4 : 7);
-        state.pending = state.mission === 2 ? 2.5 : 1.6;
+        toast(st.done, 'good', m.perStep ? 5 : 7);
+        state.pending = m.perStep || m.steps[state.step + 1]?.rebuild ? 2.8 : 1.6;
+        st.onDone?.();
+        if (st.house !== undefined) lightHouse(st.house);
         if (state.step + 1 >= m.steps.length) state.pending = 2.2;
       }
     }
@@ -2532,6 +2756,7 @@ function updateGame(dt) {
     if (world.tankLevel >= 1 && world.garden.userData.growth < 1) setGardenGrowth(Math.min(1, world.garden.userData.growth + dt * 0.3));
   }
   updateHunt(dt);
+  updateHouses(dt);
   // hut windows follow the two room bulbs in mission 4
   world.windows.forEach((w, i) => {
     let target = w.keep ? 1 : 0;
@@ -2624,7 +2849,7 @@ function drawBoard() {
   ctx.fillStyle = '#fbf7ee'; roundRect(ctx, 0, 0, W, H, 20); ctx.fill();
   ctx.fillStyle = MISSION_COLOURS[state.mission]; roundRect(ctx, 0, 0, W, 92, 20); ctx.fill(); ctx.fillRect(0, 60, W, 32);
   ctx.fillStyle = '#fff'; ctx.font = 'bold 46px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText(m.workshop ? m.title : `Mission ${state.mission + 1} of 5: ${m.title}`, 26, 62);
+  ctx.fillText(m.workshop ? m.title : `Chapter ${state.mission + 1}: ${m.title}`, 26, 62);
   ctx.textAlign = 'right'; ctx.font = 'bold 40px system-ui, sans-serif';
   const st = saved.stars[state.mission] || 0;
   ctx.fillText(m.workshop ? `${saved.ws.filter(Boolean).length}/5 ✓` : '★'.repeat(st) + '☆'.repeat(2 - st), W - 24, 62);
@@ -2649,13 +2874,14 @@ function drawBoard() {
     m.steps.forEach((s, i) => {
       const doneStep = i < state.step || (i === state.step && state.pending > 0);
       const cur = i === state.step && !doneStep;
-      if (state.mission === 2 && !cur && !doneStep) return;   // torches appear one at a time
-      if (state.mission === 2 && doneStep && i < state.step - 1) return;
+      if (m.perStep && !cur && !doneStep) return;   // levels that set their own board appear one at a time
+      if (m.perStep && doneStep && i < state.step - 1) return;
       ctx.fillStyle = doneStep ? '#1e8449' : cur ? '#13293d' : '#9aa3ab';
       ctx.font = (cur ? 'bold ' : '') + '33px system-ui, sans-serif';
       const mark = doneStep ? '✓' : cur ? '▶' : '○';
       ctx.fillText(mark, 26, y);
-      y = wrapText(ctx, s.text, 66, y, W - 92, 39) + 6;
+      const lbl = m.steps.length > 1 && (m.perStep || s.level) ? `Level ${i + 1} of ${m.steps.length}${s.level ? ' · ' + s.level : ''}: ` : '';
+      y = wrapText(ctx, lbl + s.text, 66, y, W - 92, 39) + 6;
     });
     const s = m.steps[state.step];
     const status = s.status?.();
@@ -2671,10 +2897,10 @@ function drawBoard() {
     y = wrapText(ctx, `${w.Touch} your answer on the blue panel to the right of the board.`, 26, y, W - 52, 36);
   } else {
     ctx.fillStyle = '#1e8449'; ctx.font = 'bold 50px system-ui, sans-serif';
-    y = wrapText(ctx, `Mission complete!  ${'★'.repeat(state.lastStars || 1)}`, 26, y + 20, W - 52, 58);
+    y = wrapText(ctx, m.workshop ? 'All five challenges done!' : `Chapter complete!  ${'★'.repeat(state.lastStars || 1)}`, 26, y + 20, W - 52, 58);
     ctx.fillStyle = '#13293d'; ctx.font = '31px system-ui, sans-serif';
-    const all = saved.done.slice(0, 5).every(Boolean);
-    const total = saved.stars.slice(0, 5).reduce((a, b) => a + (b || 0), 0);
+    const all = saved.done.slice(0, 6).every(Boolean);
+    const total = saved.stars.slice(0, 6).reduce((a, b) => a + (b || 0), 0);
     if (state.mission === 1) y = wrapText(ctx, `You sorted ${state.sortedRight} of 8 objects right the first time.`, 26, y + 4, W - 52, 38);
     if (state.hunt) {
       ctx.fillStyle = '#7d3c98'; ctx.font = 'bold 33px system-ui, sans-serif';
@@ -2682,7 +2908,8 @@ function drawBoard() {
       ctx.fillStyle = '#13293d'; ctx.font = '31px system-ui, sans-serif';
     }
     y = wrapText(ctx, m.workshop ? 'Keep building anything you like. Every part on the tray is free to use.'
-      : all ? `Well done! You finished all five missions and lit up the village. Stars: ${total} of 10. Try the Workshop (button 6) next.`
+      : state.party ? `The whole village has light! Party time! Stars: ${total} of 12.${all ? '' : ' Finish the other chapters to collect every star.'} Try the Workshop (button W) next.`
+        : all ? `Well done! You finished the whole story and lit up the village. Stars: ${total} of 12. Try the Workshop (button W) next.`
         : `${w.Touch} NEXT on the edge of the table to go on. One star for finishing, one for answering the question right first time.`, 26, y + 8, W - 52, 38);
   }
   // message box at the bottom
@@ -2700,16 +2927,16 @@ function drawBoard() {
     const how = input.kind === 'hand' ? 'PINCH a part to pick it up. PINCH again over an empty gap to place it. PINCH in the air to put it back. TOUCH switches and buttons.'
       : input.kind === 'controller' ? 'Pull the TRIGGER on a part to pick it up, and again over an empty gap to place it. Touch or point at switches and buttons.'
         : 'Click a part to pick it up, then click an empty gap to place it. Click a switch lever to flip it. Drag to look around.';
-    const extra = m.workshop ? (input.kind === 'mouse' || !input.kind ? '  Right-click a cell to turn it round.' : '  Pinch a cell quickly to turn it round.') : '  Yellow dots show the current flowing.';
+    const extra = m.workshop || m.flipCells ? (input.kind === 'mouse' || !input.kind ? '  Right-click a cell to turn it round.' : '  Pinch a cell quickly to turn it round.') : '  Yellow dots show the current flowing.';
     wrapText(ctx, how + extra, 26, H - 58, W - 52, 31);
   }
   boardCanvas.update();
 }
 function updatePageResults() {
   const el = document.getElementById('results'); if (!el) return;
-  if (!saved.done.some(Boolean)) { el.hidden = true; return; }
+  if (!saved.done.some(Boolean) && !saved.ws.some(Boolean)) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = '<b>Progress on this device</b><br>' + MISSIONS.slice(0, 5).map((m, i) =>
+  el.innerHTML = '<b>Progress on this device</b><br>' + MISSIONS.slice(0, 6).map((m, i) =>
     `${i + 1}. ${m.title}: ${saved.done[i] ? '★'.repeat(saved.stars[i] || 1) + '☆'.repeat(2 - (saved.stars[i] || 1)) : 'not done'}`).join('<br>')
     + `<br>Workshop challenges: ${saved.ws.filter(Boolean).length} of 5`;
 }
@@ -2774,7 +3001,7 @@ function desktopClick() {
   if (h && !h.slot) activateHit(h, null);
 }
 window.addEventListener('keydown', (e) => {
-  if (/^Digit[1-6]$/.test(e.code)) startMission(parseInt(e.code.slice(5), 10) - 1);
+  if (/^Digit[1-7]$/.test(e.code)) startMission(parseInt(e.code.slice(5), 10) - 1);
   if (e.code === 'KeyF') { const h = desktopRay(); if (h && h.comp && quickToggles(h.comp) && h.comp.type === 'cell') flipCell(h.comp); }
   if (e.code === 'KeyR') restartStep();
   if (e.code === 'KeyC') clearBoard();
@@ -2814,7 +3041,7 @@ renderer.xr.addEventListener('sessionend', () => {
 // ---------------------------------------------------------------- start
 world.windows.forEach((w) => (w.keep = !!saved.done[3]));
 setGardenGrowth(saved.done[4] ? 1 : 0.35);
-{ const k = saved.done.slice(0, 5).findIndex((d) => !d); startMission(k >= 0 ? k : WORKSHOP); }
+{ const k = saved.done.slice(0, 6).findIndex((d) => !d); startMission(k >= 0 ? k : WORKSHOP); }
 placePlayer();
 updatePageResults();
 
